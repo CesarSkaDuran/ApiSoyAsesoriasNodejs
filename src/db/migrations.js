@@ -765,5 +765,283 @@ export async function runMigrations() {
     }
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // COMERCIAL / VENTAS (replica marketing_* del sistema anterior)
+  // ══════════════════════════════════════════════════════════════════
+
+  if (!await db.schema.hasTable('embudos')) {
+    await db.schema.createTable('embudos', t => {
+      t.increments('id')
+      t.string('slug', 60).notNullable().unique()
+      t.string('nombre', 120).notNullable()
+      t.string('descripcion', 255).nullable()
+      t.enum('tipo', ['cliente', 'suscriptor']).defaultTo('cliente')
+      t.boolean('activo').defaultTo(true)
+      t.timestamps(true, true)
+    })
+    console.log('  + embudos')
+  }
+
+  if (!await db.schema.hasTable('embudo_etapas')) {
+    await db.schema.createTable('embudo_etapas', t => {
+      t.increments('id')
+      t.integer('embudo_id').unsigned().references('id').inTable('embudos').onDelete('CASCADE').notNullable().index()
+      t.string('slug', 60).notNullable()
+      t.string('nombre', 120).notNullable()
+      t.string('descripcion', 255).nullable()
+      t.integer('posicion').defaultTo(1)
+      t.boolean('es_cierre').defaultTo(false)
+      t.boolean('es_perdido').defaultTo(false)
+      t.timestamps(true, true)
+    })
+    console.log('  + embudo_etapas')
+  }
+
+  if (!await db.schema.hasTable('leads')) {
+    await db.schema.createTable('leads', t => {
+      t.increments('id')
+      t.integer('embudo_id').unsigned().references('id').inTable('embudos').onDelete('CASCADE').notNullable().index()
+      t.integer('etapa_id').unsigned().references('id').inTable('embudo_etapas').index()
+      t.string('nombre', 150).notNullable()
+      t.string('nombre_emprendedor', 150).nullable()
+      t.string('empresa', 160).nullable()
+      t.string('email', 160).nullable()
+      t.string('telefono', 60).nullable()
+      t.string('fuente', 120).nullable()
+      t.string('campania', 120).nullable()
+      t.integer('usuario_asignado_id').unsigned().references('id').inTable('users').onDelete('SET NULL').nullable()
+      t.integer('orden_pos').defaultTo(0)
+      t.dateTime('ultimo_contacto_en').nullable()
+      t.dateTime('etapa_cambiada_en').nullable()
+      t.text('notas').nullable()
+      t.text('metadata').nullable()
+      // vinculos a entidades reales al convertirse el lead
+      t.integer('empresa_id').unsigned().references('id').inTable('empresas').onDelete('SET NULL').nullable()
+      t.integer('persona_id').unsigned().references('id').inTable('personas').onDelete('SET NULL').nullable()
+      t.timestamps(true, true)
+    })
+    console.log('  + leads')
+  }
+
+  if (!await db.schema.hasTable('lead_historial')) {
+    await db.schema.createTable('lead_historial', t => {
+      t.increments('id')
+      t.integer('lead_id').unsigned().references('id').inTable('leads').onDelete('CASCADE').notNullable().index()
+      t.integer('embudo_id').unsigned().nullable()
+      t.integer('etapa_id').unsigned().nullable()
+      t.integer('usuario_id').unsigned().references('id').inTable('users').onDelete('SET NULL').nullable()
+      t.text('nota').nullable()
+      t.timestamp('created_at').defaultTo(db.fn.now())
+    })
+    console.log('  + lead_historial')
+  }
+
+  // ── Seed de embudos y etapas (mismas del sistema anterior) ──────────────
+  if (await db.schema.hasTable('embudos')) {
+    const n = await db('embudos').count('id as n').first()
+    if (Number(n.n) === 0) {
+      const [embudoClientes] = await db('embudos').insert({
+        slug: 'clientes', nombre: 'Embudo de clientes',
+        descripcion: 'Seguimiento de leads provenientes de formularios comerciales.', tipo: 'cliente',
+      })
+      const [embudoSuscriptores] = await db('embudos').insert({
+        slug: 'suscriptores', nombre: 'Embudo de suscriptores',
+        descripcion: 'Gestión de suscripciones y nurturing desde el formulario público.', tipo: 'suscriptor',
+      })
+
+      const etapasBase = [
+        ['lead-nuevo', 'Lead nuevo', 'Contacto registrado que aún no ha sido abordado.', 1, 0, 0],
+        ['primera-asesoria', 'Lead primera asesoría', 'Lead agendado para una primera asesoría o discovery.', 2, 0, 0],
+        ['realizar-propuesta', 'Realizar propuesta', 'Se debe preparar y enviar una propuesta al lead.', 3, 0, 0],
+        ['socializar-propuesta', 'Socializar la propuesta', 'Propuesta enviada, en proceso de socialización con el lead.', 4, 0, 0],
+        ['seguimiento', 'Seguimiento', 'Seguimiento activo para resolver dudas y avanzar al cierre.', 5, 0, 0],
+        ['lead-ganado', 'Lead ganado', 'Lead convertido a cliente.', 6, 1, 0],
+        ['lead-perdido', 'Lead perdido', 'Lead descartado o sin avance.', 7, 1, 1],
+      ]
+      for (const embudoId of [embudoClientes, embudoSuscriptores]) {
+        await db('embudo_etapas').insert(
+          etapasBase.map(([slug, nombre, descripcion, posicion, cierre, perdido]) => ({
+            embudo_id: embudoId, slug, nombre, descripcion,
+            posicion, es_cierre: !!cierre, es_perdido: !!perdido,
+          }))
+        )
+      }
+      console.log('  ~ embudos/etapas seed')
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // DIAGNÓSTICOS (replica producto_* del sistema anterior)
+  // ══════════════════════════════════════════════════════════════════
+
+  if (!await db.schema.hasTable('diagnosticos')) {
+    await db.schema.createTable('diagnosticos', t => {
+      t.increments('id')
+      t.string('nombre', 200).notNullable()
+      t.integer('empresa_id').unsigned().references('id').inTable('empresas').onDelete('CASCADE').nullable().index()
+      t.integer('persona_id').unsigned().references('id').inTable('personas').onDelete('CASCADE').nullable().index()
+      t.integer('responsable_id').unsigned().references('id').inTable('users').onDelete('SET NULL').nullable()
+      t.date('fecha_inicio').notNullable()
+      t.date('fecha_fin').notNullable()
+      t.enum('estado', ['pendiente', 'en_progreso', 'logrado', 'cancelado']).defaultTo('pendiente')
+      t.timestamps(true, true)
+    })
+    console.log('  + diagnosticos')
+  }
+
+  if (!await db.schema.hasTable('diagnostico_preguntas')) {
+    await db.schema.createTable('diagnostico_preguntas', t => {
+      t.increments('id')
+      t.string('slug', 100).notNullable()
+      t.string('titulo', 255).notNullable()
+      t.text('descripcion').nullable()
+      t.enum('tipo_respuesta', ['texto', 'textarea', 'numero', 'fecha', 'opciones', 'multiple', 'booleano']).notNullable()
+      t.text('opciones').nullable()            // JSON array
+      t.boolean('es_obligatoria').defaultTo(false)
+      t.text('ayuda_contextual').nullable()
+      t.integer('orden').defaultTo(1)
+      t.boolean('activo').defaultTo(true)
+      t.timestamps(true, true)
+    })
+    console.log('  + diagnostico_preguntas')
+  }
+
+  if (!await db.schema.hasTable('diagnostico_respuestas')) {
+    await db.schema.createTable('diagnostico_respuestas', t => {
+      t.increments('id')
+      t.integer('diagnostico_id').unsigned().references('id').inTable('diagnosticos').onDelete('CASCADE').notNullable().index()
+      t.integer('pregunta_id').unsigned().references('id').inTable('diagnostico_preguntas').onDelete('CASCADE').notNullable()
+      t.text('valor').nullable()
+      t.text('valor_json').nullable()
+      t.unique(['diagnostico_id', 'pregunta_id'])
+      t.timestamps(true, true)
+    })
+    console.log('  + diagnostico_respuestas')
+  }
+
+  if (!await db.schema.hasTable('diagnostico_doc_config')) {
+    await db.schema.createTable('diagnostico_doc_config', t => {
+      t.increments('id')
+      t.string('slug', 100).notNullable()
+      t.string('titulo', 255).notNullable()
+      t.text('descripcion').nullable()
+      t.boolean('es_obligatorio').defaultTo(false)
+      t.string('tipo_archivo', 100).nullable() // pdf,jpg,png
+      t.integer('maximo_archivos').nullable()
+      t.integer('orden').defaultTo(1)
+      t.boolean('activo').defaultTo(true)
+      t.timestamps(true, true)
+    })
+    console.log('  + diagnostico_doc_config')
+  }
+
+  if (!await db.schema.hasTable('diagnostico_documentos')) {
+    await db.schema.createTable('diagnostico_documentos', t => {
+      t.increments('id')
+      t.integer('diagnostico_id').unsigned().references('id').inTable('diagnosticos').onDelete('CASCADE').notNullable().index()
+      t.integer('doc_config_id').unsigned().references('id').inTable('diagnostico_doc_config').onDelete('CASCADE').notNullable()
+      t.enum('estado', ['pendiente', 'revisar', 'aprobado', 'rechazado', 'renovar']).defaultTo('pendiente')
+      t.text('comentarios_revision').nullable()
+      t.string('ruta_archivo', 255).nullable()
+      t.string('nombre_original', 255).nullable()
+      t.string('mime_type', 100).nullable()
+      t.bigInteger('tamano_bytes').nullable()
+      t.dateTime('fecha_revision').nullable()
+      t.integer('revisado_por').unsigned().references('id').inTable('users').onDelete('SET NULL').nullable()
+      t.unique(['diagnostico_id', 'doc_config_id'])
+      t.timestamps(true, true)
+    })
+    console.log('  + diagnostico_documentos')
+  }
+
+  if (!await db.schema.hasTable('diagnostico_informes')) {
+    await db.schema.createTable('diagnostico_informes', t => {
+      t.increments('id')
+      t.integer('diagnostico_id').unsigned().references('id').inTable('diagnosticos').onDelete('CASCADE').notNullable().unique()
+      t.text('contenido_html').nullable()
+      t.timestamps(true, true)
+    })
+    console.log('  + diagnostico_informes')
+  }
+
+  // ── Seed preguntas de entrevista (mismas del sistema anterior) ──────────
+  if (await db.schema.hasTable('diagnostico_preguntas')) {
+    const n = await db('diagnostico_preguntas').count('id as n').first()
+    if (Number(n.n) === 0) {
+      const preguntas = [
+        ['cual-es-el-mayor-reto-gestion-talento', '¿Cuál es el mayor reto que enfrentan en la gestión de su talento humano hoy en día?', 'Permite identificar el principal punto de dolor o desafío actual en los procesos de recursos humanos.', 'textarea', null, 1, 'Sé específico: menciona rotación, ausentismo, clima laboral, nómina o problemas de comunicación interna.', 1],
+        ['que-les-gustaria-solucionar-auditoria', '¿Qué les gustaría solucionar con esta auditoría?', 'Ayuda a comprender las expectativas y resultados esperados por el cliente.', 'texto', null, 1, 'Describe en una o dos frases qué esperas mejorar o resolver con el proceso.', 2],
+        ['herramientas-software-nomina-rrhh', '¿Qué herramientas o software utilizan actualmente para la gestión de nómina o RR.HH.?', 'Permite conocer la madurez digital y las herramientas activas en la gestión de talento.', 'texto', null, 1, 'Indica si usan Excel, ERP, software SaaS u otro sistema. Si no usan ninguno, indícalo.', 3],
+        ['problemas-rotacion-personal', '¿Se han enfrentado a problemas con la rotación de personal?', 'Identifica dificultades en la retención y estabilidad del equipo.', 'texto', null, 1, 'Indica si la rotación es alta, moderada o baja y, si es posible, las causas principales.', 4],
+        ['tienen-encargado-rh', '¿Tienen encargado de RRHH?', 'Determina si existe un responsable directo para la gestión de talento en la empresa.', 'booleano', null, 1, 'Responde Sí/No. Si es Sí, escribe el nombre, cargo y datos de contacto en el campo de detalle adicional.', 5],
+        ['camara-comercio-rut', '¿Cuenta con el certificado de Cámara de Comercio y RUT actualizados?', 'Verifica la formalidad legal de la empresa.', 'texto', null, 1, 'Si dispone de los documentos, súbelos en formato PDF o imagen clara. Si no están actualizados, indícalo.', 6],
+        ['numero-trabajadores-tipo-contratos', '¿Cuántos trabajadores tienen actualmente y qué tipo de contratos utilizan?', 'Permite dimensionar la estructura laboral y la diversidad contractual.', 'texto', null, 1, 'Especifica el número total y los tipos de contrato (fijo, indefinido, prestación de servicios, etc.).', 7],
+        ['proyeccion-plantilla-nomina', '¿Cuenta con una proyección de nómina y una plantilla de nómina en Excel?', 'Valida control financiero y trazabilidad del gasto en personal.', 'texto', null, 1, 'Súbelos si los tienes. Si no, indica si están en proceso de elaboración.', 8],
+        ['contratos-laborales-firmados', '¿Dispone de contratos laborales firmados y actualizados?', 'Evalúa el cumplimiento de requisitos legales básicos en la contratación.', 'booleano', null, 1, 'Indica si todos los contratos están firmados y vigentes; si es posible, carga una muestra representativa.', 9],
+        ['manual-de-funciones', '¿Cuenta con un manual de funciones vigente?', 'Verifica la existencia de una herramienta organizacional que define roles y responsabilidades.', 'booleano', null, 1, 'Si lo tiene, súbelo en PDF o Word; si no, indica si está en proceso de actualización.', 10],
+        ['reglamento-politicas-internas', '¿Tiene reglamento interno de trabajo y políticas internas?', 'Evalúa cumplimiento normativo interno y prácticas de gestión.', 'booleano', null, 1, 'Adjunta el documento o indica si no aplica según el tamaño de la empresa.', 11],
+        ['contratos-prestacion-servicios', '¿Gestiona actualmente contratos por prestación de servicios?', 'Identifica la existencia de colaboradores externos y su nivel de formalidad.', 'texto', null, 1, 'Indica cuántos contratistas tienen y si se lleva registro de pagos o informes de actividades.', 12],
+      ]
+      await db('diagnostico_preguntas').insert(
+        preguntas.map(([slug, titulo, descripcion, tipo, opciones, obligatoria, ayuda, orden]) => ({
+          slug, titulo, descripcion, tipo_respuesta: tipo, opciones,
+          es_obligatoria: !!obligatoria, ayuda_contextual: ayuda, orden,
+        }))
+      )
+      console.log('  ~ diagnostico_preguntas seed')
+    }
+  }
+
+  // ── Seed documentos requeridos (mismos del sistema anterior) ────────────
+  if (await db.schema.hasTable('diagnostico_doc_config')) {
+    const n = await db('diagnostico_doc_config').count('id as n').first()
+    if (Number(n.n) === 0) {
+      const docs = [
+        ['registro-camara-de-comercio', 'Registro Cámara de Comercio', 'Certificado de existencia y representación legal expedido por Cámara de Comercio.', 1, 'pdf,jpg,png', 1, 1],
+        ['rut', 'RUT / NIT / Identificación fiscal', 'Documento que identifica fiscalmente a la empresa (RUT, NIT o equivalente).', 1, 'pdf,jpg,png', 1, 2],
+        ['plantilla-nomina-excel', 'Plantilla de nómina (Excel)', 'Archivo Excel con la plantilla de nómina: columnas mínimas nombre, documento, cargo, salario, deducciones y neto.', 1, 'xlsx,xls,csv', 1, 3],
+        ['proyeccion-nomina', 'Proyección de nómina', 'Documento o spreadsheet con la proyección presupuestal de nómina (mensual/anual).', 1, 'xlsx,pdf', 1, 4],
+        ['contratos-laborales', 'Contratos laborales (muestra)', 'Contratos firmados de ejemplo que se usan en la empresa (empleados y/o contratistas).', 1, 'pdf,doc,docx', 3, 5],
+        ['manual-funciones', 'Manual de funciones', 'Documento que define roles, responsabilidades y perfiles de cargo.', 1, 'pdf,doc,docx', 1, 6],
+        ['reglamento-interno-politicas', 'Reglamento interno y políticas', 'Reglamento interno de trabajo y políticas internas (disciplinarias, compensaciones, permisos, etc.).', 1, 'pdf,doc,docx', 1, 7],
+        ['contratos-prestacion-servicios', 'Contratos por prestación de servicios', 'Contratos y registros de prestadores de servicios externos (freelancers, consultores).', 1, 'pdf,doc,docx', 5, 8],
+        ['registro-conflictos-trabajadores', 'Registro de conflictos con trabajadores', 'Documentación de quejas, sanciones, conciliaciones o demandas; si no existen, indicar "No aplica".', 0, 'pdf,doc,docx', 5, 9],
+      ]
+      await db('diagnostico_doc_config').insert(
+        docs.map(([slug, titulo, descripcion, obligatorio, tipos, maximo, orden]) => ({
+          slug, titulo, descripcion, es_obligatorio: !!obligatorio,
+          tipo_archivo: tipos, maximo_archivos: maximo, orden,
+        }))
+      )
+      console.log('  ~ diagnostico_doc_config seed')
+    }
+  }
+
+  // Permiso de módulo "diagnosticos" en user_modulos
+  if (await db.schema.hasTable('user_modulos')) {
+    if (!await db.schema.hasColumn('user_modulos', 'diagnosticos')) {
+      await db.schema.alterTable('user_modulos', t => {
+        t.boolean('diagnosticos').defaultTo(false)
+      })
+      console.log('  ~ user_modulos (diagnosticos)')
+    }
+  }
+
+  // Refresh tokens (rotación: cada uso revoca el anterior)
+  if (!await db.schema.hasTable('refresh_tokens')) {
+    await db.schema.createTable('refresh_tokens', t => {
+      t.increments('id')
+      t.integer('user_id').unsigned().notNullable()
+        .references('id').inTable('users').index()
+      t.string('token_hash', 64).notNullable().index()
+      t.datetime('expires_at').notNullable()
+      t.datetime('revoked_at').nullable()
+      t.string('ip', 45).nullable()
+      t.string('user_agent', 255).nullable()
+      t.timestamps(true, true)
+    })
+    console.log('  + refresh_tokens')
+  }
+
   console.log('Migraciones completadas.')
 }

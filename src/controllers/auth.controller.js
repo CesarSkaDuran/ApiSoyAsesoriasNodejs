@@ -1,6 +1,47 @@
 import bcrypt from 'bcryptjs'
+import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
 import db from '../db/knex.js'
+
+// Access token: corto (renovado por /auth/refresh).
+// Refresh token: opaco, aleatorio, guardado como SHA-256 en refresh_tokens,
+// con rotación en cada uso (un refresh robado y reusado queda revocado).
+const ACCESS_TTL = process.env.JWT_EXPIRES_IN || '30m'
+const REFRESH_DAYS = Number(process.env.REFRESH_TOKEN_DAYS) || 7
+
+const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex')
+
+function signAccess(user) {
+  return jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, {
+    expiresIn: ACCESS_TTL,
+  })
+}
+
+async function issueRefreshToken(userId, req) {
+  const token = crypto.randomBytes(48).toString('hex')
+  await db('refresh_tokens').insert({
+    user_id: userId,
+    token_hash: sha256(token),
+    expires_at: new Date(Date.now() + REFRESH_DAYS * 86_400_000),
+    ip: req.ip || null,
+    user_agent: String(req.headers['user-agent'] || '').slice(0, 255),
+  })
+  return token
+}
+
+// Payload completo que consume el frontend (usuario + scope + permisos)
+async function buildUserPayload(user) {
+  let empresa = null
+  let persona = null
+  if (user.role === 'empresa') {
+    empresa = await db('empresas').where('user_id', user.id).first()
+  } else if (user.role === 'independiente') {
+    persona = await db('personas').where('user_id', user.id).first()
+  }
+  const modulos = await db('user_modulos').where('user_id', user.id).first() || {}
+  const { password: _, ...userSafe } = user
+  return { ...userSafe, empresa, persona, modulos }
+}
 
 export async function login(req, res) {
   const { email, password } = req.body
@@ -22,24 +63,54 @@ export async function login(req, res) {
 
   await db('users').where('id', user.id).update({ last_seen_at: new Date() })
 
-  const token = jwt.sign(
-    { id: user.id, role: user.role },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN || '12h' }
-  )
+  const [token, refreshToken] = await Promise.all([
+    Promise.resolve(signAccess(user)),
+    issueRefreshToken(user.id, req),
+  ])
 
-  // Datos de scope para el frontend (empresa/persona + permisos)
-  let empresa = null
-  let persona = null
-  if (user.role === 'empresa') {
-    empresa = await db('empresas').where('user_id', user.id).first()
-  } else if (user.role === 'independiente') {
-    persona = await db('personas').where('user_id', user.id).first()
+  res.json({
+    token,
+    refresh_token: refreshToken,
+    expires_in: ACCESS_TTL,
+    user: await buildUserPayload(user),
+  })
+}
+
+// POST /auth/refresh — rotación: revoca el usado y emite par nuevo
+export async function refresh(req, res) {
+  const { refresh_token } = req.body || {}
+  if (!refresh_token) {
+    return res.status(400).json({ error: 'refresh_token requerido' })
   }
-  const modulos = await db('user_modulos').where('user_id', user.id).first() || {}
 
-  const { password: _, ...userSafe } = user
-  res.json({ token, user: { ...userSafe, empresa, persona, modulos } })
+  const row = await db('refresh_tokens')
+    .where('token_hash', sha256(String(refresh_token)))
+    .whereNull('revoked_at')
+    .where('expires_at', '>', new Date())
+    .first()
+
+  if (!row) {
+    return res.status(401).json({ error: 'Refresh token inválido o expirado' })
+  }
+
+  const user = await db('users')
+    .select('id', 'name', 'lastname', 'email', 'password', 'role', 'is_active')
+    .where('id', row.user_id)
+    .first()
+
+  if (!user || !user.is_active) {
+    return res.status(401).json({ error: 'Usuario no disponible' })
+  }
+
+  await db('refresh_tokens').where('id', row.id).update({ revoked_at: new Date() })
+  const newRefresh = await issueRefreshToken(user.id, req)
+
+  res.json({
+    token: signAccess(user),
+    refresh_token: newRefresh,
+    expires_in: ACCESS_TTL,
+    user: await buildUserPayload(user),
+  })
 }
 
 export async function me(req, res) {
@@ -47,7 +118,13 @@ export async function me(req, res) {
 }
 
 export async function logout(req, res) {
-  // JWT stateless: el cliente borra el token. Para revocacion real usar blacklist.
+  // Revoca el refresh token de la sesión (si viene en el body)
+  const { refresh_token } = req.body || {}
+  if (refresh_token) {
+    await db('refresh_tokens')
+      .where('token_hash', sha256(String(refresh_token)))
+      .update({ revoked_at: new Date() })
+  }
   res.json({ message: 'Sesion cerrada' })
 }
 

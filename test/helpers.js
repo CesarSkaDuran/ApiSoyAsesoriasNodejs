@@ -1,0 +1,60 @@
+// Helpers para tests de integración contra la app Express real.
+// Levanta la app en un puerto efímero y expone helpers de login/fetch.
+// Requiere la BD de desarrollo (misma .env) — los tests son mayormente
+// de lectura; las escrituras se crean y eliminan dentro del test.
+import { once } from 'node:events'
+import app from '../src/app.js'
+import db from '../src/db/knex.js'
+
+export const ADMIN = { email: 'admin@soyasesorias.com', password: '1234567' }
+export const EMPRESA = { email: 'cliente@empresa.com', password: '1234567' }
+
+let server, baseUrl
+
+export async function startApp() {
+  if (baseUrl) return baseUrl
+  server = app.listen(0)
+  await once(server, 'listening')
+  baseUrl = `http://127.0.0.1:${server.address().port}/api`
+  return baseUrl
+}
+
+export async function stopApp() {
+  if (server) server.close()
+  await db.destroy() // cierra el pool para que el proceso del test pueda salir
+}
+
+async function request(method, path, { token, body, headers } = {}) {
+  const base = await startApp()
+  const res = await fetch(`${base}${path}`, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(headers || {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  let data = null
+  try { data = await res.json() } catch { /* body vacío */ }
+  return { status: res.status, data }
+}
+
+export const api = {
+  get: (path, opts) => request('GET', path, opts),
+  post: (path, body, opts) => request('POST', path, { ...opts, body }),
+  put: (path, body, opts) => request('PUT', path, { ...opts, body }),
+  delete: (path, opts) => request('DELETE', path, opts),
+}
+
+const tokenCache = new Map()
+
+export async function loginAs({ email, password }) {
+  if (tokenCache.has(email)) return tokenCache.get(email)
+  const res = await api.post('/auth/login', { email, password })
+  if (res.status !== 200) {
+    throw new Error(`Login falló para ${email}: ${res.status} ${JSON.stringify(res.data)}`)
+  }
+  tokenCache.set(email, res.data)
+  return res.data // { token, refresh_token, user }
+}

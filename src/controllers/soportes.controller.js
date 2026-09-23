@@ -38,6 +38,22 @@ export async function list(req, res) {
   res.json({ data, total, page: Number(page), per_page: Number(per_page) })
 }
 
+// GET /soportes/:id
+export async function show(req, res) {
+  const soporte = await db('soportes')
+    .leftJoin('users', 'soportes.user_id', 'users.id')
+    .leftJoin('empresas', 'users.id', 'empresas.user_id')
+    .select('soportes.*', 'users.name as user_name', 'users.lastname as user_lastname',
+      'empresas.razon_social as empresa_nombre')
+    .where('soportes.id', req.params.id)
+    .first()
+  if (!soporte) return res.status(404).json({ error: 'Ticket no encontrado' })
+  if (req.user.role !== 'admin' && soporte.user_id !== req.user.id) {
+    return res.status(403).json({ error: 'Sin acceso' })
+  }
+  res.json({ soporte })
+}
+
 // POST /soportes - cualquier usuario autenticado crea ticket
 export async function create(req, res) {
   const { asunto, mensaje, tipo_solicitud, tipo_servicio, nombre, email, telefono } = req.body

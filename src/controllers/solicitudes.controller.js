@@ -57,11 +57,41 @@ export async function list(req, res) {
   res.json({ data, total, page: Number(page), per_page: Number(per_page) })
 }
 
+// GET /solicitudes/:id
+export async function show(req, res) {
+  const solicitud = await db('solicitudes')
+    .leftJoin('empresas', 'solicitudes.empresa_id', 'empresas.id')
+    .leftJoin('personas', 'solicitudes.persona_id', 'personas.id')
+    .leftJoin('servicios', 'solicitudes.servicio_id', 'servicios.id')
+    .select('solicitudes.*', 'empresas.razon_social as empresa_nombre',
+      'empresas.num_documento as empresa_nit',
+      'personas.num_documento as persona_nit',
+      'personas.telefono as persona_telefono',
+      'servicios.nombre as servicio_nombre',
+      db.raw("CONCAT_WS(' ', personas.primer_nombre, personas.primer_apellido) as persona_nombre"),
+      db.raw(`COALESCE(empresas.razon_social,
+        CONCAT_WS(' ', personas.primer_nombre, personas.primer_apellido)) as cliente_nombre`),
+      db.raw(`COALESCE(CONCAT(empresas.num_documento, IF(empresas.dv, CONCAT('-', empresas.dv), '')),
+        personas.num_documento) as cliente_nit`),
+      db.raw(`COALESCE(empresas.telefono_contacto, personas.telefono) as telefono`))
+    .where('solicitudes.id', req.params.id)
+    .first()
+  if (!solicitud) return res.status(404).json({ error: 'Solicitud no encontrada' })
+  if (req.user.role !== 'admin' &&
+      !canAccessEmpresa(req.user, solicitud.empresa_id) &&
+      solicitud.persona_id !== req.user.persona_id) {
+    return res.status(403).json({ error: 'Sin acceso' })
+  }
+  res.json({ solicitud })
+}
+
 // POST /solicitudes - cliente crea solicitud; admin puede crear para cualquiera
 export async function create(req, res) {
   const empresaId = req.user.role === 'admin' ? req.body.empresa_id : req.user.empresa_id
   const personaId = req.user.role === 'admin' ? req.body.persona_id : req.user.persona_id
-  if (!empresaId && !personaId) return res.status(400).json({ error: 'empresa_id o persona_id requerido' })
+  if (!empresaId && !personaId && req.user.role !== 'admin') {
+    return res.status(400).json({ error: 'empresa_id o persona_id requerido' })
+  }
 
   const [id] = await db('solicitudes').insert({
     empresa_id: empresaId || null,

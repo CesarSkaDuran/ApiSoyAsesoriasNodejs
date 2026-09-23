@@ -41,6 +41,25 @@ export async function list(req, res) {
   res.json({ data, total, page: Number(page), per_page: Number(per_page) })
 }
 
+// GET /gastos/:id
+export async function show(req, res) {
+  const gasto = await db('gastos')
+    .leftJoin('lista_gastos', 'gastos.lista_gasto_id', 'lista_gastos.id')
+    .leftJoin('empresas', 'gastos.empresa_id', 'empresas.id')
+    .leftJoin('terceros', 'gastos.tercero_id', 'terceros.id')
+    .leftJoin('sucursales', 'gastos.sucursal_id', 'sucursales.id')
+    .select('gastos.*', 'lista_gastos.nombre as tipo_nombre',
+      'empresas.razon_social as empresa_nombre', 'empresas.num_documento as empresa_nit',
+      'terceros.nombre as tercero_nombre', 'terceros.num_documento as tercero_nit',
+      'sucursales.nombre as sucursal_nombre',
+      db.raw(`COALESCE(terceros.nombre, empresas.razon_social, gastos.nombre) as proveedor_nombre`),
+      db.raw(`COALESCE(terceros.num_documento, empresas.num_documento) as proveedor_nit`))
+    .where('gastos.id', req.params.id)
+    .first()
+  if (!gasto) return res.status(404).json({ error: 'Gasto no encontrado' })
+  res.json({ gasto })
+}
+
 // POST /gastos
 export async function create(req, res) {
   const { lista_gasto_id, empresa_id, tercero_id, sucursal_id, nombre, descripcion,

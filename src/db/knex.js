@@ -1,6 +1,11 @@
 import knex from 'knex'
 import 'dotenv/config'
 
+// Pool ajustable por env para picos de carga:
+//   DB_POOL_MAX   conexiones máximas simultáneas (default 20)
+//   DB_POOL_MIN   conexiones mínimas calientes    (default 2)
+// Los timeouts evitan requests colgados esperando conexión libre
+// y reciclan conexiones ociosas para no agotar max_connections de MySQL.
 const db = knex({
   client: 'mysql2',
   connection: {
@@ -10,8 +15,18 @@ const db = knex({
     user:     process.env.DB_USER     || 'root',
     password: process.env.DB_PASSWORD || '',
     charset:  'utf8mb4',
+    timezone: 'Z',
   },
-  pool: { min: 2, max: 10 },
+  pool: {
+    min: Number(process.env.DB_POOL_MIN) || 2,
+    max: Number(process.env.DB_POOL_MAX) || 20,
+    acquireTimeoutMillis: Number(process.env.DB_POOL_ACQUIRE_MS) || 30_000,
+    createTimeoutMillis: 5_000,
+    destroyTimeoutMillis: 5_000,
+    idleTimeoutMillis: 30_000,
+    reapIntervalMillis: 1_000,
+    createRetryIntervalMillis: 200,
+  },
 })
 
 export default db
