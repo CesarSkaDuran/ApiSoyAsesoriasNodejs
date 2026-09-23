@@ -22,6 +22,9 @@ export async function list(req, res) {
 
   if (req.user.role === 'empresa') {
     query.where('empresas.id', req.user.empresa_id)
+  } else if (req.user.role !== 'admin') {
+    // independiente u otros roles no ven el directorio de empresas
+    query.whereRaw('1=0')
   }
   if (search) {
     query.where(q =>

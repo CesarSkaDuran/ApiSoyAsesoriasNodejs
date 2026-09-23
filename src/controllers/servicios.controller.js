@@ -1,5 +1,6 @@
 import db from '../db/knex.js'
 import { canAccessEmpresa } from '../middlewares/auth.js'
+import { createNotifications, publishNotifications } from '../realtime/notifications.js'
 
 // Registros de servicios prestados (viejo detalle_servicios).
 // status: 1=Pendiente 2=Finalizado 3=Verificado 4=En tramite 5=Cancelado
@@ -122,19 +123,53 @@ export async function updateRegistro(req, res) {
   for (const campo of CAMPOS) {
     if (req.body[campo] !== undefined) data[campo] = req.body[campo]
   }
-  // El cliente solo puede pedir; cambiar estados es del admin
-  if (req.user.role !== 'admin') {
-    delete data.status
-    delete data.status_pago
-    delete data.valor
-    if (!canAccessEmpresa(req.user, registro.empresa_id) && registro.persona_id !== req.user.persona_id) {
-      return res.status(403).json({ error: 'Sin acceso' })
-    }
-  }
   if (Object.keys(data).length === 0) return res.status(400).json({ error: 'Nada que actualizar' })
 
-  await db('servicio_registros').where('id', registro.id).update(data)
-  res.json({ registro: await db('servicio_registros').where('id', registro.id).first() })
+  const statusChanged = data.status !== undefined && Number(data.status) !== Number(registro.status)
+  const paymentChanged = data.status_pago !== undefined && Number(data.status_pago) !== Number(registro.status_pago)
+  const notifications = []
+
+  const updated = await db.transaction(async trx => {
+    await trx('servicio_registros').where('id', registro.id).update(data)
+
+    const solicitud = registro.solicitud_id
+      ? await trx('solicitudes').where('id', registro.solicitud_id).first()
+      : null
+    if (statusChanged && solicitud) {
+      const requestStatus = { 1: 'aprobada', 4: 'en_proceso', 2: 'completada', 3: 'completada', 5: 'cancelada' }[Number(data.status)]
+      const transitions = {
+        aprobada: ['en_proceso', 'completada', 'rechazada', 'cancelada'],
+        en_proceso: ['completada', 'cancelada'],
+      }
+      if (requestStatus && requestStatus !== solicitud.status && transitions[solicitud.status]?.includes(requestStatus)) {
+        await trx('solicitudes').where('id', solicitud.id).update({ status: requestStatus })
+      }
+    }
+
+    if (statusChanged || paymentChanged) {
+      const clientUserId = registro.empresa_id
+        ? (await trx('empresas').select('user_id').where('id', registro.empresa_id).first())?.user_id
+        : registro.persona_id
+          ? (await trx('personas').select('user_id').where('id', registro.persona_id).first())?.user_id
+          : null
+      const statusLabels = { 1: 'Pendiente', 2: 'Finalizado', 3: 'Verificado', 4: 'En trámite', 5: 'Cancelado' }
+      const paymentLabels = { 1: 'Pagado', 2: 'Pendiente', 3: 'Cancelado' }
+      const changes = []
+      if (statusChanged) changes.push(`Servicio: ${statusLabels[data.status] || data.status}`)
+      if (paymentChanged) changes.push(`Pago: ${paymentLabels[data.status_pago] || data.status_pago}`)
+      notifications.push(...await createNotifications(trx, clientUserId ? [clientUserId] : [], {
+        titulo: 'Actualización de tu servicio',
+        mensaje: `${registro.nombre || 'Servicio'} — ${changes.join(' · ')}.`,
+        solicitudId: registro.solicitud_id,
+        url: registro.solicitud_id ? '/admin/solicitudes' : '/admin/servicios/afiliaciones',
+      }))
+    }
+
+    return trx('servicio_registros').where('id', registro.id).first()
+  })
+
+  publishNotifications(notifications)
+  res.json({ registro: updated })
 }
 
 // GET /servicios-catalogo - catalogo de servicios/planes (tipo=servicio|plan)

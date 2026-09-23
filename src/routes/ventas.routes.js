@@ -18,19 +18,21 @@ const ingestLimiter = rateLimit({
 })
 router.post('/ingest', ingestLimiter, ingestLead)
 
-// Autenticado
-router.get('/', authMiddleware, ventasIndex)
-router.get('/embudo/:slug', authMiddleware, ventasEmbudo)
-router.post('/embudos', authMiddleware, requireRole('admin'), createEmbudo)
-router.put('/embudos/:id', authMiddleware, requireRole('admin'), updateEmbudo)
-router.post('/embudos/:id/etapas', authMiddleware, requireRole('admin'), createEtapa)
-router.put('/etapas/:id', authMiddleware, requireRole('admin'), updateEtapa)
-router.delete('/etapas/:id', authMiddleware, requireRole('admin'), deleteEtapa)
-router.get('/leads/:id', authMiddleware, showLead)
-router.post('/leads', authMiddleware, createLead)
-router.put('/leads/:id', authMiddleware, updateLead)
-router.put('/leads/:id/etapa', authMiddleware, moveLead)
-router.post('/leads/:id/convertir', authMiddleware, convertirLead)
-router.delete('/leads/:id', authMiddleware, requireRole('admin'), deleteLead)
+// Panel comercial: solo staff (admin). Los clientes no deben ver ni
+// manipular el pipeline ni convertir leads en empresas/personas.
+router.use(authMiddleware, requireRole('admin'))
+router.get('/', ventasIndex)
+router.get('/embudo/:slug', ventasEmbudo)
+router.post('/embudos', createEmbudo)
+router.put('/embudos/:id', updateEmbudo)
+router.post('/embudos/:id/etapas', createEtapa)
+router.put('/etapas/:id', updateEtapa)
+router.delete('/etapas/:id', deleteEtapa)
+router.get('/leads/:id', showLead)
+router.post('/leads', createLead)
+router.put('/leads/:id', updateLead)
+router.put('/leads/:id/etapa', moveLead)
+router.post('/leads/:id/convertir', convertirLead)
+router.delete('/leads/:id', deleteLead)
 
 export default router

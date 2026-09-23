@@ -1,5 +1,6 @@
 import db from '../db/knex.js'
 import { canAccessEmpresa } from '../middlewares/auth.js'
+import { createNotifications, publishNotifications } from '../realtime/notifications.js'
 
 // Solicitudes de servicio: el cliente pide algo (afiliacion, asesoria...),
 // el admin lo gestiona. status: pendiente/en_proceso/completada/rechazada
@@ -93,35 +94,116 @@ export async function create(req, res) {
     return res.status(400).json({ error: 'empresa_id o persona_id requerido' })
   }
 
-  const [id] = await db('solicitudes').insert({
-    empresa_id: empresaId || null,
-    persona_id: personaId || null,
-    servicio_id: req.body.servicio_id || null,
-    descripcion: req.body.descripcion || null,
-    status: 'pendiente',
+  let notificationRows = []
+  const solicitud = await db.transaction(async trx => {
+    const [id] = await trx('solicitudes').insert({
+      empresa_id: empresaId || null,
+      persona_id: personaId || null,
+      servicio_id: req.body.servicio_id || null,
+      descripcion: req.body.descripcion || null,
+      status: 'pendiente',
+    })
+    const created = await trx('solicitudes').where('id', id).first()
+    const recipients = req.user.role === 'admin'
+      ? empresaId
+        ? (await trx('empresas').select('user_id').where('id', empresaId).first())?.user_id
+        : personaId
+          ? (await trx('personas').select('user_id').where('id', personaId).first())?.user_id
+          : null
+      : (await trx('users').select('id').where('role', 'admin').where('is_active', true)).map(user => user.id)
+
+    notificationRows = await createNotifications(trx, Array.isArray(recipients) ? recipients : recipients ? [recipients] : [], {
+      titulo: req.user.role === 'admin' ? 'Nueva solicitud de servicio' : 'Nueva solicitud recibida',
+      mensaje: `Solicitud #${id}: ${created.descripcion || 'Servicio solicitado'}`,
+      solicitudId: id,
+      url: '/admin/solicitudes',
+    })
+    return created
   })
-  const solicitud = await db('solicitudes').where('id', id).first()
+
+  publishNotifications(notificationRows)
   res.status(201).json({ solicitud })
 }
 
-// PUT /solicitudes/:id - admin cambia estado; cliente solo ve/cancela lo suyo
+// PUT /solicitudes/:id - admin gestiona estados; el cliente solo puede actualizar su descripción
 export async function update(req, res) {
   const solicitud = await db('solicitudes').where('id', req.params.id).first()
   if (!solicitud) return res.status(404).json({ error: 'Solicitud no encontrada' })
 
   const data = {}
+  const notifications = []
   if (req.user.role === 'admin') {
-    for (const campo of ['status', 'descripcion', 'servicio_id']) {
+    for (const campo of ['descripcion', 'servicio_id']) {
       if (req.body[campo] !== undefined) data[campo] = req.body[campo]
+    }
+    if (req.body.status !== undefined && req.body.status !== solicitud.status) {
+      const transitions = {
+        pendiente: ['aprobada', 'rechazada', 'cancelada'],
+        aprobada: ['en_proceso', 'completada', 'rechazada', 'cancelada'],
+        en_proceso: ['completada', 'cancelada'],
+      }
+      if (!transitions[solicitud.status]?.includes(req.body.status)) {
+        return res.status(409).json({ error: `No se puede cambiar de ${solicitud.status} a ${req.body.status}` })
+      }
+      data.status = req.body.status
     }
   } else {
     if (!canAccessEmpresa(req.user, solicitud.empresa_id) && solicitud.persona_id !== req.user.persona_id) {
       return res.status(403).json({ error: 'Sin acceso' })
     }
-    if (req.body.descripcion !== undefined) data.descripcion = req.body.descripcion
+    if (req.body.descripcion !== undefined && solicitud.status === 'pendiente') {
+      data.descripcion = req.body.descripcion
+    }
   }
   if (Object.keys(data).length === 0) return res.status(400).json({ error: 'Nada que actualizar' })
 
-  await db('solicitudes').where('id', solicitud.id).update(data)
-  res.json({ solicitud: await db('solicitudes').where('id', solicitud.id).first() })
+  const updated = await db.transaction(async trx => {
+    await trx('solicitudes').where('id', solicitud.id).update(data)
+
+    if (data.status) {
+      const serviceStatus = {
+        aprobada: 1,
+        en_proceso: 4,
+        completada: 2,
+        rechazada: 5,
+        cancelada: 5,
+      }[data.status]
+      let serviceRecord = await trx('servicio_registros').where('solicitud_id', solicitud.id).first()
+      if (!serviceRecord && data.status === 'aprobada') {
+        const servicio = solicitud.servicio_id
+          ? await trx('servicios').where('id', solicitud.servicio_id).first()
+          : null
+        const [serviceId] = await trx('servicio_registros').insert({
+          solicitud_id: solicitud.id,
+          empresa_id: solicitud.empresa_id,
+          persona_id: solicitud.persona_id,
+          servicio_id: solicitud.servicio_id,
+          nombre: servicio?.nombre || 'Solicitud aprobada',
+          fecha: new Date(),
+          cantidad: 1,
+          status: serviceStatus,
+          status_pago: 2,
+          obs: solicitud.descripcion,
+        })
+        serviceRecord = { id: serviceId }
+      } else if (serviceRecord) {
+        await trx('servicio_registros').where('id', serviceRecord.id).update({ status: serviceStatus })
+      }
+
+      const clientUserId = solicitud.empresa_id
+        ? (await trx('empresas').select('user_id').where('id', solicitud.empresa_id).first())?.user_id
+        : (await trx('personas').select('user_id').where('id', solicitud.persona_id).first())?.user_id
+      notifications.push(...await createNotifications(trx, clientUserId ? [clientUserId] : [], {
+        titulo: 'Actualización de tu solicitud',
+        mensaje: `La solicitud #${solicitud.id} cambió a: ${data.status.replace('_', ' ')}.`,
+        solicitudId: solicitud.id,
+        url: '/admin/solicitudes',
+      }))
+    }
+
+    return trx('solicitudes').where('id', solicitud.id).first()
+  })
+
+  publishNotifications(notifications)
+  res.json({ solicitud: updated })
 }

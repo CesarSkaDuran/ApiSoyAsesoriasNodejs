@@ -33,6 +33,22 @@ async function empresaDeOwner(ownerCol, ownerId) {
   return null // persona_id: independientes no tienen empresa_id
 }
 
+// Dueño efectivo del documento: empresa o persona (independiente)
+async function duenoDeDoc(ownerCol, ownerId) {
+  if (ownerCol === 'persona_id') {
+    return { empresaId: null, personaId: Number(ownerId) }
+  }
+  return { empresaId: await empresaDeOwner(ownerCol, ownerId), personaId: null }
+}
+
+// Fail closed: si el owner no resuelve a empresa ni persona, se niega el acceso
+function canAccessDoc(user, empresaId, personaId) {
+  if (user.role === 'admin') return true
+  if (empresaId !== null) return canAccessEmpresa(user, empresaId)
+  if (personaId !== null) return user.persona_id === personaId
+  return false
+}
+
 // POST /documentos - sube archivo al storage privado (auth requerido)
 export async function uploadDoc(req, res) {
   if (!req.file) return res.status(400).json({ error: 'Archivo requerido' })
@@ -46,8 +62,8 @@ export async function uploadDoc(req, res) {
   }
 
   // Verificar que el usuario pueda subir a ese owner
-  const empresaId = await empresaDeOwner(ownerCol, req.body[ownerCol])
-  if (empresaId !== null && !canAccessEmpresa(req.user, empresaId)) {
+  const { empresaId, personaId } = await duenoDeDoc(ownerCol, req.body[ownerCol])
+  if (!canAccessDoc(req.user, empresaId, personaId)) {
     unlinkSync(req.file.path)
     return res.status(403).json({ error: 'Sin acceso a este recurso' })
   }
@@ -74,8 +90,8 @@ export async function list(req, res) {
     return res.status(400).json({ error: `Indique filtro: ${OWNERS.join(', ')}` })
   }
 
-  const empresaId = await empresaDeOwner(ownerCol, req.query[ownerCol])
-  if (empresaId !== null && !canAccessEmpresa(req.user, empresaId)) {
+  const { empresaId, personaId } = await duenoDeDoc(ownerCol, req.query[ownerCol])
+  if (!canAccessDoc(req.user, empresaId, personaId)) {
     return res.status(403).json({ error: 'Sin acceso a este recurso' })
   }
 
@@ -92,8 +108,10 @@ export async function download(req, res) {
   if (!doc) return res.status(404).json({ error: 'Documento no encontrado' })
 
   const ownerCol = OWNERS.find(o => doc[o])
-  const empresaId = ownerCol ? await empresaDeOwner(ownerCol, doc[ownerCol]) : null
-  if (empresaId !== null && !canAccessEmpresa(req.user, empresaId)) {
+  const { empresaId, personaId } = ownerCol
+    ? await duenoDeDoc(ownerCol, doc[ownerCol])
+    : { empresaId: null, personaId: null }
+  if (!canAccessDoc(req.user, empresaId, personaId)) {
     return res.status(403).json({ error: 'Sin acceso a este documento' })
   }
 
@@ -113,8 +131,10 @@ export async function remove(req, res) {
   if (!doc) return res.status(404).json({ error: 'Documento no encontrado' })
 
   const ownerCol = OWNERS.find(o => doc[o])
-  const empresaId = ownerCol ? await empresaDeOwner(ownerCol, doc[ownerCol]) : null
-  if (empresaId !== null && !canAccessEmpresa(req.user, empresaId)) {
+  const { empresaId, personaId } = ownerCol
+    ? await duenoDeDoc(ownerCol, doc[ownerCol])
+    : { empresaId: null, personaId: null }
+  if (!canAccessDoc(req.user, empresaId, personaId)) {
     return res.status(403).json({ error: 'Sin acceso a este documento' })
   }
 

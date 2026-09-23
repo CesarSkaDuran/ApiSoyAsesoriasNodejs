@@ -138,6 +138,87 @@ export async function servicios(req, res) {
   res.json({ data })
 }
 
+// Resumen del cliente logueado (empresa o independiente) para su home.
+// Todos los conteos quedan aislados al tenant del usuario.
+export async function miResumen(req, res) {
+  const empresaId = req.user.empresa_id || null
+  const personaId = req.user.persona_id || null
+
+  // Filtra tablas con columna empresa_id/persona_id al scope del cliente
+  const scopeCliente = (q, table) => q.where(b => {
+    if (empresaId) b.where(`${table}.empresa_id`, empresaId)
+    if (personaId) b.orWhere(`${table}.persona_id`, personaId)
+    if (!empresaId && !personaId) b.whereRaw('1=0')
+  })
+
+  const scopeEmpresa = (q, table) => empresaId
+    ? q.where(`${table}.empresa_id`, empresaId)
+    : q.whereRaw('1=0')
+
+  const [
+    empleadosActivos, cuentasPorEstado, carteraPendiente, pagosMensuales,
+    serviciosPorEstado, serviciosPorTipo, nominas, planillas, documentos,
+    solicitudesPorEstado, soportesPorEstado, diagnosticosPorEstado,
+    solicitudesRecientes, ultimaNomina,
+  ] = await Promise.all([
+    db('empleados').where('empresa_id', empresaId || -1).where('status', 'activo').count('* as n').first(),
+    scopeCliente(db('cuentas_cobro'), 'cuentas_cobro').select('status').count('* as total').groupBy('status'),
+    scopeCliente(db('cuentas_cobro'), 'cuentas_cobro').whereIn('status', [2, 3]).sum('valor_total as n').first(),
+    scopeCliente(db('cuentas_cobro'), 'cuentas_cobro')
+      .select(
+        db.raw("DATE_FORMAT(fecha, '%Y-%m') as mes"),
+        db.raw('SUM(valor_total) as total'),
+        db.raw('SUM(CASE WHEN status = 1 THEN valor_total ELSE 0 END) as pagado')
+      )
+      .whereRaw("fecha >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)")
+      .whereNot('status', 5)
+      .groupByRaw("DATE_FORMAT(fecha, '%Y-%m')")
+      .orderBy('mes'),
+    scopeCliente(db('servicio_registros'), 'servicio_registros').select('status').count('* as total').groupBy('status'),
+    scopeCliente(db('servicio_registros'), 'servicio_registros')
+      .select('nombre').count('* as total').groupBy('nombre').orderBy('total', 'desc').limit(6),
+    scopeEmpresa(db('nominas'), 'nominas').count('* as n').first(),
+    scopeEmpresa(db('planillas'), 'planillas').count('* as n').first(),
+    scopeCliente(db('documentos'), 'documentos').count('* as n').first(),
+    scopeCliente(db('solicitudes'), 'solicitudes').select('status').count('* as total').groupBy('status'),
+    db('soportes').where('user_id', req.user.id).select('status').count('* as total').groupBy('status'),
+    scopeCliente(db('diagnosticos'), 'diagnosticos').select('estado').count('* as total').groupBy('estado'),
+    scopeCliente(db('solicitudes'), 'solicitudes')
+      .select('solicitudes.id', 'solicitudes.descripcion', 'solicitudes.status', 'solicitudes.created_at')
+      .orderBy('solicitudes.id', 'desc').limit(5),
+    scopeEmpresa(db('nominas'), 'nominas').orderBy('id', 'desc').first(),
+  ])
+
+  const SERVICIO_ESTADOS = { 1: 'Pendiente', 2: 'Finalizado', 3: 'Verificado', 4: 'En trámite', 5: 'Cancelado' }
+  const CUENTA_ESTADOS = { 1: 'Pagada', 2: 'Pendiente', 3: 'En trámite', 4: 'Activa', 5: 'Rechazada' }
+  const SOPORTE_ESTADOS = { 1: 'Pendiente', 2: 'En proceso', 3: 'Resuelto', 4: 'Cerrado', 5: 'Rechazado' }
+
+  res.json({
+    empleados_activos: Number(empleadosActivos?.n) || 0,
+    nominas_total: Number(nominas?.n) || 0,
+    planillas_total: Number(planillas?.n) || 0,
+    documentos_total: Number(documentos?.n) || 0,
+    ultima_nomina: ultimaNomina || null,
+    cartera_pendiente: parseFloat(carteraPendiente?.n) || 0,
+    cuentas_por_estado: cuentasPorEstado.map(r => ({
+      estado: CUENTA_ESTADOS[r.status] || `Estado ${r.status}`, total: Number(r.total),
+    })),
+    pagos_mensuales: pagosMensuales.map(r => ({
+      mes: r.mes, total: parseFloat(r.total) || 0, pagado: parseFloat(r.pagado) || 0,
+    })),
+    servicios_por_estado: serviciosPorEstado.map(r => ({
+      estado: SERVICIO_ESTADOS[r.status] || `Estado ${r.status}`, total: Number(r.total),
+    })),
+    servicios_por_tipo: serviciosPorTipo.map(r => ({ nombre: r.nombre, total: Number(r.total) })),
+    solicitudes_por_estado: solicitudesPorEstado.map(r => ({ estado: r.status, total: Number(r.total) })),
+    soportes_por_estado: soportesPorEstado.map(r => ({
+      estado: SOPORTE_ESTADOS[r.status] || `Estado ${r.status}`, total: Number(r.total),
+    })),
+    diagnosticos_por_estado: diagnosticosPorEstado.map(r => ({ estado: r.estado, total: Number(r.total) })),
+    solicitudes_recientes: solicitudesRecientes,
+  })
+}
+
 // Resumen general para dashboard admin
 export async function resumen(req, res) {
   const [empresas, empleados, pendiente, serviciosPend, ticketsAbiertos] =

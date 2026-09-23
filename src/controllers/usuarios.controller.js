@@ -70,7 +70,7 @@ export async function update(req, res) {
   if (modulos && typeof modulos === 'object') {
     const exists = await db('user_modulos').where('user_id', user.id).first()
     const MODULOS = ['home','empresas','independientes','pagos','gastos','informes',
-      'soportes','solicitudes','documentos','empleados','nominas','planillas','servicios']
+      'soportes','solicitudes','documentos','empleados','nominas','planillas','servicios','diagnosticos']
     const modData = {}
     for (const m of MODULOS) if (modulos[m] !== undefined) modData[m] = !!modulos[m]
     if (exists) await db('user_modulos').where('user_id', user.id).update(modData)

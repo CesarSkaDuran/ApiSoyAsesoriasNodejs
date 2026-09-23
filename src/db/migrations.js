@@ -603,10 +603,16 @@ export async function runMigrations() {
       t.integer('persona_id').unsigned().references('id').inTable('personas').nullable().index()
       t.integer('servicio_id').unsigned().references('id').inTable('servicios').nullable()
       t.string('descripcion', 500).nullable()
-      t.enum('status', ['pendiente', 'en_proceso', 'completada', 'rechazada']).defaultTo('pendiente')
+      t.enum('status', ['pendiente', 'aprobada', 'en_proceso', 'completada', 'rechazada', 'cancelada']).defaultTo('pendiente')
       t.timestamps(true, true)
     })
     console.log('  + solicitudes')
+  }
+
+  const [solicitudStatusColumns] = await db.raw("SHOW COLUMNS FROM `solicitudes` LIKE 'status'")
+  if (solicitudStatusColumns?.[0] && !solicitudStatusColumns[0].Type.includes("'aprobada'")) {
+    await db.raw("ALTER TABLE `solicitudes` MODIFY `status` ENUM('pendiente','aprobada','en_proceso','completada','rechazada','cancelada') NOT NULL DEFAULT 'pendiente'")
+    console.log('  ~ solicitudes.status (approval workflow)')
   }
 
   if (!await db.schema.hasTable('soportes')) {
@@ -632,6 +638,44 @@ export async function runMigrations() {
       t.timestamps(true, true)
     })
     console.log('  + notificaciones')
+  }
+  if (!await db.schema.hasColumn('notificaciones', 'tipo')) {
+    await db.schema.alterTable('notificaciones', t => t.string('tipo', 50).notNullable().defaultTo('general'))
+  }
+  if (!await db.schema.hasColumn('notificaciones', 'solicitud_id')) {
+    await db.schema.alterTable('notificaciones', t => {
+      t.integer('solicitud_id').unsigned().references('id').inTable('solicitudes').onDelete('SET NULL').nullable().index()
+    })
+  }
+  if (!await db.schema.hasColumn('notificaciones', 'url')) {
+    await db.schema.alterTable('notificaciones', t => t.string('url', 500).nullable())
+  }
+  if (!await db.schema.hasColumn('servicio_registros', 'solicitud_id')) {
+    await db.schema.alterTable('servicio_registros', t => {
+      t.integer('solicitud_id').unsigned().references('id').inTable('solicitudes').onDelete('SET NULL').nullable().unique()
+    })
+  }
+  if (!await db.schema.hasTable('auditorias')) {
+    await db.schema.createTable('auditorias', t => {
+      t.increments('id')
+      t.integer('user_id').unsigned().references('id').inTable('users').onDelete('SET NULL').nullable().index()
+      t.string('actor_email', 180).nullable()
+      t.string('actor_role', 30).nullable()
+      t.string('accion', 40).notNullable()
+      t.string('recurso', 80).notNullable()
+      t.string('recurso_id', 80).nullable()
+      t.string('metodo', 10).notNullable()
+      t.string('ruta', 255).notNullable()
+      t.integer('codigo_respuesta').unsigned().notNullable()
+      t.string('ip', 45).nullable()
+      t.string('user_agent', 255).nullable()
+      t.json('campos').nullable()
+      t.json('detalle').nullable()
+      t.timestamps(true, true)
+      t.index(['created_at'])
+      t.index(['recurso', 'created_at'])
+    })
+    console.log('  + auditorias')
   }
 
   if (!await db.schema.hasTable('observaciones')) {

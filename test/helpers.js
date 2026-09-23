@@ -6,21 +6,34 @@ import { once } from 'node:events'
 import app from '../src/app.js'
 import db from '../src/db/knex.js'
 
+process.env.NODE_ENV = 'test'
+
 export const ADMIN = { email: 'admin@soyasesorias.com', password: '1234567' }
 export const EMPRESA = { email: 'cliente@empresa.com', password: '1234567' }
 
-let server, baseUrl
+let server, baseUrl, startPromise
 
 export async function startApp() {
   if (baseUrl) return baseUrl
+  if (startPromise) return startPromise
   server = app.listen(0)
-  await once(server, 'listening')
-  baseUrl = `http://127.0.0.1:${server.address().port}/api`
-  return baseUrl
+  startPromise = once(server, 'listening').then(() => {
+    baseUrl = `http://127.0.0.1:${server.address().port}/api`
+    return baseUrl
+  })
+  return startPromise
 }
 
 export async function stopApp() {
-  if (server) server.close()
+  if (server?.listening) {
+    const closed = once(server, 'close')
+    server.close()
+    server.closeAllConnections?.()
+    await closed
+  }
+  server = undefined
+  baseUrl = undefined
+  startPromise = undefined
   await db.destroy() // cierra el pool para que el proceso del test pueda salir
 }
 
