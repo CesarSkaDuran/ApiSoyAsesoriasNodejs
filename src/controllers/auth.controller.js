@@ -17,9 +17,9 @@ function signAccess(user) {
   })
 }
 
-async function issueRefreshToken(userId, req) {
+async function issueRefreshToken(userId, req, connection = db) {
   const token = crypto.randomBytes(48).toString('hex')
-  await db('refresh_tokens').insert({
+  await connection('refresh_tokens').insert({
     user_id: userId,
     token_hash: sha256(token),
     expires_at: new Date(Date.now() + REFRESH_DAYS * 86_400_000),
@@ -126,6 +126,47 @@ export async function logout(req, res) {
       .update({ revoked_at: new Date() })
   }
   res.json({ message: 'Sesion cerrada' })
+}
+
+export async function changePassword(req, res) {
+  const { current_password, new_password } = req.body || {}
+  if (typeof current_password !== 'string' || typeof new_password !== 'string') {
+    return res.status(400).json({ error: 'La contraseña actual y la nueva son requeridas' })
+  }
+  if (new_password.length < 8 || Buffer.byteLength(new_password, 'utf8') > 72) {
+    return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 8 caracteres y no superar 72 bytes' })
+  }
+
+  const user = await db('users')
+    .select('id', 'name', 'lastname', 'email', 'password', 'role', 'is_active')
+    .where('id', req.user.id)
+    .first()
+  if (!user || !user.is_active) return res.status(403).json({ error: 'Usuario no disponible' })
+  if (!await bcrypt.compare(current_password, user.password)) {
+    return res.status(400).json({ error: 'La contraseña actual es incorrecta' })
+  }
+  if (await bcrypt.compare(new_password, user.password)) {
+    return res.status(400).json({ error: 'La nueva contraseña debe ser diferente a la actual' })
+  }
+
+  const password = await bcrypt.hash(new_password, 10)
+  let refreshToken
+  await db.transaction(async trx => {
+    await trx('users').where('id', user.id).update({ password })
+    await trx('refresh_tokens')
+      .where('user_id', user.id)
+      .whereNull('revoked_at')
+      .update({ revoked_at: new Date() })
+    refreshToken = await issueRefreshToken(user.id, req, trx)
+  })
+
+  const updatedUser = { ...user, password }
+  res.json({
+    token: signAccess(updatedUser),
+    refresh_token: refreshToken,
+    expires_in: ACCESS_TTL,
+    user: await buildUserPayload(updatedUser),
+  })
 }
 
 // Crea el usuario de una empresa o independiente + su fila de permisos.

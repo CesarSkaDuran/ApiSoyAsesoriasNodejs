@@ -19,7 +19,10 @@ const MAESTROS = {
   departamentos: {
     label: 'Departamentos', icon: 'map',
     singular: 'departamento',
-    fields: [txt('nombre', 'Nombre', { required: true })],
+    fields: [
+      txt('nombre', 'Nombre', { required: true }),
+      txt('codigo_dane', 'Código DANE (2 díg.)'),
+    ],
     usadoEn: [
       { table: 'ciudades', col: 'departamento_id', label: 'ciudades' },
       { table: 'empresas', col: 'departamento_id', label: 'empresas' },
@@ -32,6 +35,7 @@ const MAESTROS = {
     fields: [
       txt('nombre', 'Nombre', { required: true }),
       sel('departamento_id', 'Departamento', 'departamentos', { required: true }),
+      txt('codigo_dane', 'Código DANE (3 díg.)'),
     ],
     joins: [{ fk: 'departamento_id', table: 'departamentos', alias: 'departamento_nombre' }],
     usadoEn: [
@@ -44,25 +48,41 @@ const MAESTROS = {
   eps: {
     label: 'EPS', icon: 'heart-pulse',
     singular: 'EPS',
-    fields: [txt('nombre', 'Nombre', { required: true }), bool('activo', 'Activo')],
+    fields: [
+      txt('nombre', 'Nombre', { required: true }),
+      txt('codigo_pila', 'Código PILA (6 díg., tabla oficial del operador)'),
+      bool('activo', 'Activo'),
+    ],
     usadoEn: [{ table: 'empleados', col: 'eps_id', label: 'empleados' }],
   },
   arl: {
     label: 'ARL', icon: 'shield-check',
     singular: 'ARL',
-    fields: [txt('nombre', 'Nombre', { required: true }), bool('activo', 'Activo')],
+    fields: [
+      txt('nombre', 'Nombre', { required: true }),
+      txt('codigo_pila', 'Código PILA (6 díg., tabla oficial del operador)'),
+      bool('activo', 'Activo'),
+    ],
     usadoEn: [{ table: 'empleados', col: 'arl_id', label: 'empleados' }],
   },
   pensiones: {
     label: 'Fondos de pensión', icon: 'piggy-bank',
     singular: 'fondo de pensión',
-    fields: [txt('nombre', 'Nombre', { required: true }), bool('activo', 'Activo')],
+    fields: [
+      txt('nombre', 'Nombre', { required: true }),
+      txt('codigo_pila', 'Código PILA (6 díg., tabla oficial del operador)'),
+      bool('activo', 'Activo'),
+    ],
     usadoEn: [{ table: 'empleados', col: 'pension_id', label: 'empleados' }],
   },
   cajas_compensacion: {
     label: 'Cajas de compensación', icon: 'hand-coins',
     singular: 'caja de compensación',
-    fields: [txt('nombre', 'Nombre', { required: true }), bool('activo', 'Activo')],
+    fields: [
+      txt('nombre', 'Nombre', { required: true }),
+      txt('codigo_pila', 'Código PILA (6 díg., tabla oficial del operador)'),
+      bool('activo', 'Activo'),
+    ],
     usadoEn: [
       { table: 'empleados', col: 'caja_cf_id', label: 'empleados' },
       { table: 'empresas', col: 'caja_compensacion_id', label: 'empresas' },
@@ -76,7 +96,10 @@ const MAESTROS = {
   cargos: {
     label: 'Cargos', icon: 'briefcase',
     singular: 'cargo',
-    fields: [txt('nombre', 'Nombre', { required: true })],
+    fields: [
+      txt('nombre', 'Nombre', { required: true }),
+      txt('codigo_ciuo', 'Código CIUO (ocupación PILA)'),
+    ],
     usadoEn: [{ table: 'empleados', col: 'cargo_id', label: 'empleados' }],
   },
   actividades_economicas: {
@@ -113,6 +136,17 @@ const MAESTROS = {
     fields: [txt('nombre', 'Nombre', { required: true })],
     usadoEn: [{ table: 'gastos', col: 'lista_gasto_id', label: 'gastos' }],
   },
+  documento_tipos: {
+    label: 'Tipos de documento', icon: 'file-text',
+    singular: 'tipo de documento',
+    fields: [
+      txt('nombre', 'Nombre', { required: true }),
+      area('descripcion', 'Descripción'),
+      num('orden', 'Orden'),
+      bool('activo', 'Activo'),
+    ],
+    usadoEn: [{ table: 'documentos', col: 'tipo_id', label: 'documentos' }],
+  },
   sucursales: {
     label: 'Sucursales', icon: 'store',
     singular: 'sucursal',
@@ -121,6 +155,7 @@ const MAESTROS = {
       sel('empresa_id', 'Empresa', 'empresas', { required: true }),
       txt('direccion', 'Dirección'),
       sel('ciudad_id', 'Ciudad', 'ciudades'),
+      txt('codigo_pila', 'Código sucursal PILA (5 díg.)'),
     ],
     joins: [
       { fk: 'empresa_id', table: 'empresas', col: 'razon_social', alias: 'empresa_nombre' },

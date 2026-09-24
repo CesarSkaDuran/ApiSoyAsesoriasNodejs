@@ -1,3 +1,4 @@
+import bcrypt from 'bcryptjs'
 import db from '../db/knex.js'
 
 // Usuarios del sistema (solo admin lista/gestiona).
@@ -81,4 +82,34 @@ export async function update(req, res) {
     .where('id', user.id)
     .select('id', 'name', 'lastname', 'email', 'role', 'is_active').first()
   res.json({ user: actualizado })
+}
+
+export async function resetPassword(req, res) {
+  const user = await db('users')
+    .select('id', 'password', 'role')
+    .where('id', req.params.id)
+    .first()
+  if (!user) return res.status(404).json({ error: 'Usuario no encontrado' })
+  if (!['empresa', 'independiente'].includes(user.role)) {
+    return res.status(403).json({ error: 'Solo se pueden restablecer contraseñas de usuarios cliente' })
+  }
+
+  const { new_password } = req.body || {}
+  if (typeof new_password !== 'string' || new_password.length < 8 || Buffer.byteLength(new_password, 'utf8') > 72) {
+    return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 8 caracteres y no superar 72 bytes' })
+  }
+  if (await bcrypt.compare(new_password, user.password)) {
+    return res.status(400).json({ error: 'La nueva contraseña debe ser diferente a la actual' })
+  }
+
+  const password = await bcrypt.hash(new_password, 10)
+  await db.transaction(async trx => {
+    await trx('users').where('id', user.id).update({ password })
+    await trx('refresh_tokens')
+      .where('user_id', user.id)
+      .whereNull('revoked_at')
+      .update({ revoked_at: new Date() })
+  })
+
+  res.json({ message: 'Contraseña restablecida' })
 }

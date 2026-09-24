@@ -4,10 +4,13 @@ import { canAccessEmpresa } from '../middlewares/auth.js'
 const CAMPOS = [
   'primer_nombre', 'segundo_nombre', 'primer_apellido', 'segundo_apellido',
   'tipo_documento', 'numero_documento', 'direccion', 'movil', 'email',
-  'fecha_ingreso', 'fecha_retiro', 'salario_base', 'subsidio_transporte',
+  'fecha_ingreso', 'fecha_retiro', 'salario_base', 'subsidio_transporte', 'auxilio_transporte_mode',
   'tipo_contrato', 'periodo_pago', 'riesgo', 'tipo_vinculacion',
   'observaciones', 'status', 'sucursal_id', 'cargo_id', 'eps_id',
   'arl_id', 'pension_id', 'caja_cf_id', 'ciudad_id',
+  // Datos PILA (Res. 2388/2016) — solo alimentan el archivo plano
+  'tipo_cotizante', 'subtipo_cotizante', 'tipo_trabajador', 'subtipo_trabajador',
+  'salario_integral', 'extranjero_sin_pension', 'colombiano_exterior', 'salario_variable',
 ]
 
 // GET /empleados - scoped: empresa ve solo los suyos; admin filtra por ?empresa_id

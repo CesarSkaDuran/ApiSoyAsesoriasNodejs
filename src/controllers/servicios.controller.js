@@ -160,6 +160,7 @@ export async function updateRegistro(req, res) {
       notifications.push(...await createNotifications(trx, clientUserId ? [clientUserId] : [], {
         titulo: 'Actualización de tu servicio',
         mensaje: `${registro.nombre || 'Servicio'} — ${changes.join(' · ')}.`,
+        tipo: 'servicio',
         solicitudId: registro.solicitud_id,
         url: registro.solicitud_id ? '/admin/solicitudes' : '/admin/servicios/afiliaciones',
       }))

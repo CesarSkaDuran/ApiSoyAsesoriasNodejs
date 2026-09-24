@@ -1,6 +1,22 @@
 import db from '../db/knex.js'
+import { resolve, sep } from 'path'
+import { createReadStream, existsSync, unlinkSync } from 'fs'
 import { canAccessEmpresa } from '../middlewares/auth.js'
 import { createNotifications, publishNotifications } from '../realtime/notifications.js'
+
+const STORAGE_DIR = resolve(process.env.STORAGE_DIR || 'storage/documentos')
+
+// Acceso a la solicitud: admin o el cliente dueño (empresa o independiente)
+function canAccessSolicitud(user, solicitud) {
+  if (user.role === 'admin') return true
+  return canAccessEmpresa(user, solicitud.empresa_id) || solicitud.persona_id === user.persona_id
+}
+
+async function clientUserId(trx, solicitud) {
+  return solicitud.empresa_id
+    ? (await trx('empresas').select('user_id').where('id', solicitud.empresa_id).first())?.user_id
+    : (await trx('personas').select('user_id').where('id', solicitud.persona_id).first())?.user_id
+}
 
 // Solicitudes de servicio: el cliente pide algo (afiliacion, asesoria...),
 // el admin lo gestiona. status: pendiente/en_proceso/completada/rechazada
@@ -133,8 +149,15 @@ export async function update(req, res) {
   const data = {}
   const notifications = []
   if (req.user.role === 'admin') {
-    for (const campo of ['descripcion', 'servicio_id']) {
+    for (const campo of ['descripcion', 'servicio_id', 'observaciones']) {
       if (req.body[campo] !== undefined) data[campo] = req.body[campo]
+    }
+    if (req.body.fecha_entrega !== undefined) {
+      const f = req.body.fecha_entrega
+      if (f !== null && f !== '' && Number.isNaN(Date.parse(f))) {
+        return res.status(400).json({ error: 'fecha_entrega no es una fecha válida' })
+      }
+      data.fecha_entrega = f || null
     }
     if (req.body.status !== undefined && req.body.status !== solicitud.status) {
       const transitions = {
@@ -201,9 +224,124 @@ export async function update(req, res) {
       }))
     }
 
+    if (data.fecha_entrega !== undefined && data.fecha_entrega !== solicitud.fecha_entrega) {
+      const clientUserId = solicitud.empresa_id
+        ? (await trx('empresas').select('user_id').where('id', solicitud.empresa_id).first())?.user_id
+        : (await trx('personas').select('user_id').where('id', solicitud.persona_id).first())?.user_id
+      const fechaTxt = data.fecha_entrega
+        ? new Date(`${data.fecha_entrega}T00:00:00`).toLocaleDateString('es-CO')
+        : null
+      notifications.push(...await createNotifications(trx, clientUserId ? [clientUserId] : [], {
+        titulo: 'Fecha de entrega de tu solicitud',
+        mensaje: data.fecha_entrega
+          ? `La solicitud #${solicitud.id} tiene fecha de entrega: ${fechaTxt}.`
+          : `Se retiró la fecha de entrega de la solicitud #${solicitud.id}.`,
+        solicitudId: solicitud.id,
+        url: '/admin/solicitudes',
+      }))
+    }
+
     return trx('solicitudes').where('id', solicitud.id).first()
   })
 
   publishNotifications(notifications)
+  res.json({ solicitud: updated })
+}
+
+// PUT /solicitudes/:id/respuesta - el admin adjunta el documento/respuesta de la solicitud
+export async function uploadRespuesta(req, res) {
+  if (req.user.role !== 'admin') {
+    if (req.file) unlinkSync(req.file.path)
+    return res.status(403).json({ error: 'Solo el administrador puede adjuntar la respuesta' })
+  }
+  const solicitud = await db('solicitudes').where('id', req.params.id).first()
+  if (!solicitud) {
+    if (req.file) unlinkSync(req.file.path)
+    return res.status(404).json({ error: 'Solicitud no encontrada' })
+  }
+  if (!req.file) return res.status(400).json({ error: 'Archivo requerido' })
+
+  const previousPath = solicitud.respuesta_path
+  let notificationRows = []
+  const updated = await db.transaction(async trx => {
+    await trx('solicitudes').where('id', solicitud.id).update({
+      respuesta_path: req.file.filename,
+      respuesta_nombre: req.file.originalname,
+      respuesta_mime: req.file.mimetype,
+      respuesta_size: req.file.size,
+      respuesta_at: new Date(),
+    })
+
+    const userId = await clientUserId(trx, solicitud)
+    notificationRows = await createNotifications(trx, userId ? [userId] : [], {
+      titulo: 'Respuesta disponible en tu solicitud',
+      mensaje: `La solicitud #${solicitud.id} tiene un documento de respuesta: ${req.file.originalname}.`,
+      solicitudId: solicitud.id,
+      url: '/admin/solicitudes',
+    })
+
+    return trx('solicitudes').where('id', solicitud.id).first()
+  })
+
+  // Reemplazo: borra el archivo anterior fuera de la transaccion
+  if (previousPath && previousPath !== req.file.filename) {
+    const oldFullPath = resolve(STORAGE_DIR, previousPath)
+    if (oldFullPath.startsWith(`${STORAGE_DIR}${sep}`) && existsSync(oldFullPath)) {
+      unlinkSync(oldFullPath)
+    }
+  }
+
+  publishNotifications(notificationRows)
+  res.json({ solicitud: updated })
+}
+
+// GET /solicitudes/:id/respuesta - descarga autenticada (admin o cliente dueño)
+export async function downloadRespuesta(req, res) {
+  const solicitud = await db('solicitudes').where('id', req.params.id).first()
+  if (!solicitud || !solicitud.respuesta_path) {
+    return res.status(404).json({ error: 'La solicitud no tiene respuesta' })
+  }
+  if (!canAccessSolicitud(req.user, solicitud)) {
+    return res.status(403).json({ error: 'Sin acceso a esta solicitud' })
+  }
+
+  const fullPath = resolve(STORAGE_DIR, solicitud.respuesta_path)
+  if (!fullPath.startsWith(`${STORAGE_DIR}${sep}`) || !existsSync(fullPath)) {
+    return res.status(404).json({ error: 'Archivo no disponible' })
+  }
+
+  res.setHeader('Content-Type', solicitud.respuesta_mime || 'application/octet-stream')
+  res.setHeader('Content-Disposition', `inline; filename="${solicitud.respuesta_nombre}"`)
+  createReadStream(fullPath).pipe(res)
+}
+
+// DELETE /solicitudes/:id/respuesta - el admin retira el documento de respuesta
+export async function deleteRespuesta(req, res) {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Solo el administrador puede eliminar la respuesta' })
+  }
+  const solicitud = await db('solicitudes').where('id', req.params.id).first()
+  if (!solicitud) return res.status(404).json({ error: 'Solicitud no encontrada' })
+  if (!solicitud.respuesta_path) {
+    return res.status(400).json({ error: 'La solicitud no tiene respuesta' })
+  }
+
+  const previousPath = solicitud.respuesta_path
+  const updated = await db.transaction(async trx => {
+    await trx('solicitudes').where('id', solicitud.id).update({
+      respuesta_path: null,
+      respuesta_nombre: null,
+      respuesta_mime: null,
+      respuesta_size: null,
+      respuesta_at: null,
+    })
+    return trx('solicitudes').where('id', solicitud.id).first()
+  })
+
+  const fullPath = resolve(STORAGE_DIR, previousPath)
+  if (fullPath.startsWith(`${STORAGE_DIR}${sep}`) && existsSync(fullPath)) {
+    unlinkSync(fullPath)
+  }
+
   res.json({ solicitud: updated })
 }

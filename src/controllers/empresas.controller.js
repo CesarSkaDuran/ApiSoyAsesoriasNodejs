@@ -9,6 +9,7 @@ const CAMPOS = [
   'imagen', 'num_empleados', 'riesgo', 'valor_empleado', 'iva', 'fecha_registro',
   'status', 'observaciones', 'actividad_economica_id', 'departamento_id',
   'ciudad_id', 'caja_compensacion_id', 'exonerado_parafiscales',
+  'arl_id', 'eps_id',
 ]
 
 // GET /empresas - admin: todas (con search/paginacion). empresa: solo la suya.

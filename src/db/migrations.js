@@ -1,4 +1,5 @@
 import db from './knex.js'
+import { NOMINA_PARAMETER_DEFAULTS, NOMINA_JSON_FIELDS } from '../nomina-parameters.js'
 
 // Schema nuevo para SoyAsesorias.
 // InnoDB + FKs reales + indices. Montos DECIMAL, fechas DATE/DATETIME.
@@ -311,6 +312,7 @@ export async function runMigrations() {
       t.date('fecha_retiro').nullable()
       t.decimal('salario_base', 15, 2).defaultTo(0)
       t.boolean('subsidio_transporte').defaultTo(false)
+      t.enum('auxilio_transporte_mode', ['automatico', 'si', 'no']).notNullable().defaultTo('automatico')
       t.enum('tipo_contrato', ['indefinido', 'fijo', 'obra_labor', 'prestacion', 'aprendizaje', 'otro']).nullable()
       t.enum('periodo_pago', ['mensual', 'quincenal', 'semanal']).defaultTo('mensual')
       t.enum('riesgo', ['I', 'II', 'III', 'IV', 'V']).nullable()
@@ -360,10 +362,36 @@ export async function runMigrations() {
       t.decimal('total_horas_extras', 15, 2).defaultTo(0)
       t.decimal('total_otros_pagos', 15, 2).defaultTo(0)
       t.decimal('total_deducciones', 15, 2).defaultTo(0)
+      t.decimal('total_neto_pagar', 15, 2).defaultTo(0)
+      t.integer('vigencia').unsigned().notNullable().defaultTo(2026)
+      t.boolean('aplica_exoneracion').notNullable().defaultTo(false)
+      t.json('parametros_snapshot').nullable()
+      t.decimal('total_aportes_empleador', 15, 2).defaultTo(0)
+      t.decimal('total_prestaciones', 15, 2).defaultTo(0)
+      t.decimal('total_costo_empresa', 15, 2).defaultTo(0)
       t.enum('status', ['borrador', 'liquidada', 'pagada']).defaultTo('borrador')
       t.timestamps(true, true)
     })
     console.log('  + nominas')
+  }
+
+  const nominaHeaderColumns = [
+    ['vigencia', t => t.integer('vigencia').unsigned().notNullable().defaultTo(2026)],
+    ['dias_periodo', t => t.integer('dias_periodo').unsigned().notNullable().defaultTo(30)],
+    ['aplica_exoneracion', t => t.boolean('aplica_exoneracion').notNullable().defaultTo(false)],
+    ['total_neto_pagar', t => t.decimal('total_neto_pagar', 15, 2).defaultTo(0)],
+    ['parametros_snapshot', t => t.json('parametros_snapshot').nullable()],
+    ['total_aportes_empleador', t => t.decimal('total_aportes_empleador', 15, 2).defaultTo(0)],
+    ['total_prestaciones', t => t.decimal('total_prestaciones', 15, 2).defaultTo(0)],
+    ['total_costo_empresa', t => t.decimal('total_costo_empresa', 15, 2).defaultTo(0)],
+    ['fecha_inicio', t => t.date('fecha_inicio').nullable()],
+    ['fecha_fin', t => t.date('fecha_fin').nullable()],
+  ]
+  for (const [column, add] of nominaHeaderColumns) {
+    if (!await db.schema.hasColumn('nominas', column)) {
+      await db.schema.alterTable('nominas', add)
+      console.log(`  ~ nominas.${column}`)
+    }
   }
 
   // Detalle por empleado: devengados + aportes seguridad social (PILA) + prestaciones
@@ -404,6 +432,145 @@ export async function runMigrations() {
     console.log('  + nomina_detalles')
   }
 
+  if (!await db.schema.hasColumn('empleados', 'auxilio_transporte_mode')) {
+    await db.schema.alterTable('empleados', t => {
+      t.enum('auxilio_transporte_mode', ['automatico', 'si', 'no']).notNullable().defaultTo('automatico')
+    })
+    console.log('  ~ empleados.auxilio_transporte_mode')
+  }
+
+  const nominaDetailColumns = [
+    ['salud_empleado', t => t.decimal('salud_empleado', 15, 2).defaultTo(0)],
+    ['pension_empleado', t => t.decimal('pension_empleado', 15, 2).defaultTo(0)],
+    ['fsp', t => t.decimal('fsp', 15, 2).defaultTo(0)],
+    ['prima', t => t.decimal('prima', 15, 2).defaultTo(0)],
+    ['retencion_fuente', t => t.decimal('retencion_fuente', 15, 2).defaultTo(0)],
+    ['total_devengado', t => t.decimal('total_devengado', 15, 2).defaultTo(0)],
+    ['total_deducciones', t => t.decimal('total_deducciones', 15, 2).defaultTo(0)],
+    ['deducciones_detalle', t => t.json('deducciones_detalle').nullable()],
+    ['valor_vacaciones', t => t.decimal('valor_vacaciones', 15, 2).defaultTo(0)],
+    ['total_aportes_empleador', t => t.decimal('total_aportes_empleador', 15, 2).defaultTo(0)],
+    ['total_prestaciones', t => t.decimal('total_prestaciones', 15, 2).defaultTo(0)],
+    ['neto_pagar', t => t.decimal('neto_pagar', 15, 2).defaultTo(0)],
+    ['costo_empresa', t => t.decimal('costo_empresa', 15, 2).defaultTo(0)],
+    ['no_salarial_ibc', t => t.decimal('no_salarial_ibc', 15, 2).defaultTo(0)],
+    ['exonerado_ley_114_1', t => t.boolean('exonerado_ley_114_1').notNullable().defaultTo(false)],
+    ['retencion_calculada', t => t.decimal('retencion_calculada', 15, 2).defaultTo(0)],
+    ['retencion_ajuste', t => t.decimal('retencion_ajuste', 15, 2).defaultTo(0)],
+    ['retencion_ajuste_motivo', t => t.string('retencion_ajuste_motivo', 300).nullable()],
+    ['ingreso_noc_incr', t => t.boolean('ingreso_noc_incr').notNullable().defaultTo(false)],
+    ['ingreso_noc_incr_motivo', t => t.string('ingreso_noc_incr_motivo', 300).nullable()],
+    ['ingresos_detalle', t => t.json('ingresos_detalle').nullable()],
+    ['dias_incapacidad', t => t.decimal('dias_incapacidad', 5, 1).defaultTo(0)],
+    ['valor_incapacidad_empleador', t => t.decimal('valor_incapacidad_empleador', 15, 2).defaultTo(0)],
+    ['valor_incapacidad_tercero', t => t.decimal('valor_incapacidad_tercero', 15, 2).defaultTo(0)],
+    ['recargos_detalle', t => t.json('recargos_detalle').nullable()],
+    ['novedades_detalle', t => t.json('novedades_detalle').nullable()],
+    ['alertas', t => t.json('alertas').nullable()],
+  ]
+  for (const [column, add] of nominaDetailColumns) {
+    if (!await db.schema.hasColumn('nomina_detalles', column)) {
+      await db.schema.alterTable('nomina_detalles', add)
+      console.log(`  ~ nomina_detalles.${column}`)
+    }
+  }
+
+  if (!await db.schema.hasTable('nomina_parametros')) {
+    await db.schema.createTable('nomina_parametros', t => {
+      t.integer('vigencia').unsigned().primary()
+      t.decimal('salario_minimo', 15, 2).notNullable()
+      t.decimal('auxilio_transporte', 15, 2).notNullable()
+      t.decimal('auxilio_tope_smmlv', 5, 2).notNullable().defaultTo(2)
+      t.decimal('max_ibc_smmlv', 5, 2).notNullable().defaultTo(25)
+      t.decimal('uvt', 15, 2).notNullable()
+      t.decimal('salud_empleado_pct', 7, 4).notNullable()
+      t.decimal('pension_empleado_pct', 7, 4).notNullable()
+      t.decimal('salud_empleador_pct', 7, 4).notNullable()
+      t.decimal('pension_empleador_pct', 7, 4).notNullable()
+      for (const k of ['arl_i', 'arl_ii', 'arl_iii', 'arl_iv', 'arl_v']) t.decimal(`${k}_pct`, 7, 4).notNullable()
+      for (const k of ['caja', 'sena', 'icbf', 'prima', 'cesantias', 'intereses_cesantias', 'vacaciones']) {
+        const precision = ['prima', 'cesantias', 'vacaciones'].includes(k) ? 10 : 7
+        const scale = ['prima', 'cesantias', 'vacaciones'].includes(k) ? 8 : 4
+        t.decimal(`${k}_pct${k === 'intereses_cesantias' ? '_anual' : ''}`, precision, scale).notNullable()
+      }
+      t.decimal('fsp_tope_inicial_smmlv', 5, 2).notNullable().defaultTo(4)
+      for (const k of ['fsp_4_16', 'fsp_16_17', 'fsp_17_18', 'fsp_18_19', 'fsp_19_20', 'fsp_mas_20']) t.decimal(`${k}_pct`, 7, 4).notNullable()
+      t.decimal('limite_no_salarial_pct', 7, 4).notNullable().defaultTo(40)
+      t.string('fuente_normativa', 500).nullable()
+      t.timestamps(true, true)
+    })
+    console.log('  + nomina_parametros')
+  }
+  if (!await db.schema.hasColumn('nomina_parametros', 'max_ibc_smmlv')) {
+    await db.schema.alterTable('nomina_parametros', t => {
+      t.decimal('max_ibc_smmlv', 5, 2).notNullable().defaultTo(25)
+    })
+    console.log('  ~ nomina_parametros.max_ibc_smmlv')
+  }
+  for (const column of ['prima_pct', 'cesantias_pct', 'vacaciones_pct']) {
+    const [columns] = await db.raw(`SHOW COLUMNS FROM nomina_parametros LIKE '${column}'`)
+    if (columns?.[0]?.Type === 'decimal(7,4)') {
+      await db.raw(`ALTER TABLE nomina_parametros MODIFY ${column} DECIMAL(10,8) NOT NULL`)
+    }
+  }
+  await db('nomina_parametros').where('prima_pct', 8.3333).update({ prima_pct: 8.33333333 })
+  await db('nomina_parametros').where('cesantias_pct', 8.3333).update({ cesantias_pct: 8.33333333 })
+  await db('nomina_parametros').where('vacaciones_pct', 4.1667).update({ vacaciones_pct: 4.16666667 })
+
+  // Fase 2: retención art. 383, recargos con fecha de corte e incapacidades
+  const nominaParamColumns = [
+    ['retencion_tabla', t => t.json('retencion_tabla').nullable()],
+    ['retencion_exenta_pct', t => t.decimal('retencion_exenta_pct', 7, 4).notNullable().defaultTo(25)],
+    ['retencion_exenta_tope_uvt', t => t.decimal('retencion_exenta_tope_uvt', 9, 2).notNullable().defaultTo(240)],
+    ['extra_diurna_pct', t => t.decimal('extra_diurna_pct', 7, 4).notNullable().defaultTo(25)],
+    ['extra_nocturna_pct', t => t.decimal('extra_nocturna_pct', 7, 4).notNullable().defaultTo(75)],
+    ['recargo_nocturno_pct', t => t.decimal('recargo_nocturno_pct', 7, 4).notNullable().defaultTo(35)],
+    ['dominical_cortes', t => t.json('dominical_cortes').nullable()],
+    ['jornada_cortes', t => t.json('jornada_cortes').nullable()],
+    ['extras_max_diarias', t => t.decimal('extras_max_diarias', 5, 1).notNullable().defaultTo(2)],
+    ['extras_max_semanales', t => t.decimal('extras_max_semanales', 5, 1).notNullable().defaultTo(12)],
+    ['incapacidad_comun_dias_empleador', t => t.decimal('incapacidad_comun_dias_empleador', 5, 1).notNullable().defaultTo(2)],
+    ['incapacidad_comun_eps_pct', t => t.decimal('incapacidad_comun_eps_pct', 7, 4).notNullable().defaultTo(66.67)],
+    ['incapacidad_excedente_pct', t => t.decimal('incapacidad_excedente_pct', 7, 4).notNullable().defaultTo(0)],
+    ['incapacidad_laboral_dias_empleador', t => t.decimal('incapacidad_laboral_dias_empleador', 5, 1).notNullable().defaultTo(1)],
+    ['incapacidad_laboral_pct', t => t.decimal('incapacidad_laboral_pct', 7, 4).notNullable().defaultTo(100)],
+    ['licencia_maternidad_dias', t => t.decimal('licencia_maternidad_dias', 5, 1).notNullable().defaultTo(126)],
+    ['licencia_paternidad_dias', t => t.decimal('licencia_paternidad_dias', 5, 1).notNullable().defaultTo(14)],
+    // Salario integral: cotizaciones sobre el 70% (CST 132; Ley 100/93 art. 18)
+    ['salario_integral_ibc_pct', t => t.decimal('salario_integral_ibc_pct', 7, 4).notNullable().defaultTo(70)],
+  ]
+  for (const [column, add] of nominaParamColumns) {
+    if (!await db.schema.hasColumn('nomina_parametros', column)) {
+      await db.schema.alterTable('nomina_parametros', add)
+      console.log(`  ~ nomina_parametros.${column}`)
+    }
+  }
+
+  for (const params of Object.values(NOMINA_PARAMETER_DEFAULTS)) {
+    const row = { ...params, created_at: new Date(), updated_at: new Date() }
+    for (const field of NOMINA_JSON_FIELDS) {
+      if (row[field] !== undefined) row[field] = JSON.stringify(row[field])
+    }
+    const existing = await db('nomina_parametros').where('vigencia', params.vigencia).first()
+    if (!existing) {
+      await db('nomina_parametros').insert(row)
+    } else {
+      // Rellena solo columnas nuevas que sigan NULL; no pisa valores editados
+      const fill = {}
+      for (const [key, value] of Object.entries(row)) {
+        if (['vigencia', 'fuente_normativa', 'created_at', 'updated_at'].includes(key)) continue
+        if (existing[key] === null || existing[key] === undefined) fill[key] = value
+      }
+      if (Object.keys(fill).length) {
+        await db('nomina_parametros').where('vigencia', params.vigencia).update(fill)
+      }
+    }
+  }
+  await db('nomina_parametros')
+    .where('vigencia', 2026)
+    .where('fuente_normativa', 'Decretos 0159 y 1470 de 2026; Resolución DIAN 000238 de 2025; tasas SGSS vigentes 2026.')
+    .update({ fuente_normativa: NOMINA_PARAMETER_DEFAULTS[2026].fuente_normativa })
+
   if (!await db.schema.hasTable('horas_extras')) {
     await db.schema.createTable('horas_extras', t => {
       t.increments('id')
@@ -416,6 +583,11 @@ export async function runMigrations() {
       t.timestamps(true, true)
     })
     console.log('  + horas_extras')
+  }
+  const [heTipo] = await db.raw(`SHOW COLUMNS FROM horas_extras LIKE 'tipo'`)
+  if (heTipo?.[0] && !String(heTipo[0].Type).includes('extra_diurna_dominical')) {
+    await db.raw(`ALTER TABLE horas_extras MODIFY COLUMN tipo ENUM('diurna','nocturna','dominical','festiva','recargo_nocturno','nocturna_dominical','extra_diurna_dominical','extra_nocturna_dominical') NULL DEFAULT 'diurna'`)
+    console.log('  ~ horas_extras.tipo')
   }
 
   if (!await db.schema.hasTable('otros_ingresos')) {
@@ -430,18 +602,92 @@ export async function runMigrations() {
     })
     console.log('  + otros_ingresos')
   }
+  if (!await db.schema.hasColumn('otros_ingresos', 'concepto_id')) {
+    await db.schema.alterTable('otros_ingresos', t => {
+      t.integer('concepto_id').unsigned().nullable()
+    })
+    console.log('  ~ otros_ingresos.concepto_id')
+  }
+
+  // Catálogo de conceptos de nómina: tipifica si el pago constituye salario
+  // (afecta IBC/prestaciones y la regla del 40%) y su tratamiento fiscal para
+  // retención (gravable vs INCR). limite_incr_uvt/condicion_salario_uvt permiten
+  // INCR parcial con tope (ej. alimentación: ET art. 387-1).
+  if (!await db.schema.hasTable('conceptos_nomina')) {
+    await db.schema.createTable('conceptos_nomina', t => {
+      t.increments('id')
+      t.string('nombre', 120).notNullable()
+      t.boolean('constitutivo_salario').notNullable().defaultTo(true)
+      t.enum('tratamiento_fiscal', ['gravable', 'incr']).notNullable().defaultTo('gravable')
+      t.decimal('limite_incr_uvt', 8, 2).nullable() // tope mensual en UVT del componente INCR
+      t.decimal('condicion_salario_uvt', 8, 2).nullable() // techo salarial mensual para aplicar el INCR
+      // Estado separado del texto: el string puede cambiar, el estado no.
+      // Bloquea el concepto en liquidación y en la UI hasta verificación legal.
+      t.boolean('activo_pendiente_verificacion').notNullable().defaultTo(false)
+      t.string('fuente_normativa', 300).nullable()
+      t.boolean('activo').notNullable().defaultTo(true)
+      t.timestamps(true, true)
+    })
+    console.log('  + conceptos_nomina')
+  }
+  for (const col of ['limite_incr_uvt', 'condicion_salario_uvt']) {
+    if (!await db.schema.hasColumn('conceptos_nomina', col)) {
+      await db.schema.alterTable('conceptos_nomina', t => { t.decimal(col, 8, 2).nullable() })
+      console.log(`  ~ conceptos_nomina.${col}`)
+    }
+  }
+  if (!await db.schema.hasColumn('conceptos_nomina', 'activo_pendiente_verificacion')) {
+    await db.schema.alterTable('conceptos_nomina', t => {
+      t.boolean('activo_pendiente_verificacion').notNullable().defaultTo(false)
+    })
+    console.log('  ~ conceptos_nomina.activo_pendiente_verificacion')
+  }
+
+  // Seed/sincronización idempotente del catálogo (también corrige filas ya
+  // insertadas por el seed original, identificadas por nombre o alias previo).
+  const CONCEPTOS_SEED = [
+    { nombre: 'Bonificación extralegal', alias: [], constitutivo_salario: 1, tratamiento_fiscal: 'gravable', limite_incr_uvt: null, condicion_salario_uvt: null, fuente_normativa: 'CST art. 127: constituye salario salvo pacto expreso de desalarización (art. 128)' },
+    { nombre: 'Bonificación pactada como no salarial', alias: [], constitutivo_salario: 0, tratamiento_fiscal: 'gravable', limite_incr_uvt: null, condicion_salario_uvt: null, fuente_normativa: 'CST arts. 127-128: pacto de no salarialidad; sigue siendo renta gravable' },
+    { nombre: 'Viáticos ocasionales (manutención y alojamiento)', alias: ['Viáticos de manutención y hospedaje'], constitutivo_salario: 0, tratamiento_fiscal: 'incr', limite_incr_uvt: null, condicion_salario_uvt: null, fuente_normativa: 'CST art. 130, D. 1625/2016 art. 1.2.4.7 y Concepto DIAN 113/2024: INCR solo viáticos ocasionales soportados; los habituales son gravables' },
+    { nombre: 'Auxilio o compensación extralegal', alias: [], constitutivo_salario: 0, tratamiento_fiscal: 'gravable', limite_incr_uvt: null, condicion_salario_uvt: null, fuente_normativa: 'CST arts. 127-128 (pacto no salarial); tratamiento fiscal a confirmar con el contador' },
+    { nombre: 'Auxilio de alimentación (pagos a terceros)', alias: [], constitutivo_salario: 0, tratamiento_fiscal: 'incr', limite_incr_uvt: 41, condicion_salario_uvt: 310, fuente_normativa: 'ET art. 387-1: no ingreso hasta 41 UVT/mes si el salario no excede 310 UVT; el exceso es gravable' },
+    { nombre: 'Auxilio de educación', alias: [], constitutivo_salario: 0, tratamiento_fiscal: 'gravable', limite_incr_uvt: null, condicion_salario_uvt: null, activo_pendiente_verificacion: 1, fuente_normativa: 'Pendiente de verificación con contador - no activar sin confirmación (INCR y tope sin fuente confirmada; gravable por defecto)' },
+    { nombre: 'Auxilio de guardería', alias: [], constitutivo_salario: 0, tratamiento_fiscal: 'gravable', limite_incr_uvt: null, condicion_salario_uvt: null, activo_pendiente_verificacion: 1, fuente_normativa: 'Pendiente de verificación con contador - no activar sin confirmación (INCR y tope sin fuente confirmada; gravable por defecto)' },
+  ]
+  for (const c of CONCEPTOS_SEED) {
+    const { alias, ...row } = c
+    const existente = await db('conceptos_nomina')
+      .where('nombre', c.nombre).orWhereIn('nombre', alias.length ? alias : [''])
+      .first()
+    if (existente) {
+      await db('conceptos_nomina').where('id', existente.id).update({ ...row, updated_at: new Date() })
+    } else {
+      await db('conceptos_nomina').insert({ ...row, activo: 1, created_at: new Date(), updated_at: new Date() })
+    }
+  }
+  console.log('  ~ conceptos_nomina seed sincronizado')
 
   if (!await db.schema.hasTable('deducciones')) {
     await db.schema.createTable('deducciones', t => {
       t.increments('id')
       t.integer('empleado_id').unsigned().references('id').inTable('empleados').onDelete('CASCADE').notNullable().index()
       t.integer('nomina_id').unsigned().references('id').inTable('nominas').onDelete('SET NULL').nullable()
+      // CST 154-156 (embargo/alimentos/cooperativa), Ley 1527/2012 (libranza)
+      t.enum('tipo', ['embargo', 'libranza', 'cooperativa', 'alimentos', 'prestamo', 'otro'])
+        .notNullable().defaultTo('otro')
       t.string('concepto', 200).notNullable()
       t.decimal('valor', 15, 2).notNullable()
       t.date('fecha').nullable()
       t.timestamps(true, true)
     })
     console.log('  + deducciones')
+  }
+  if (!await db.schema.hasColumn('deducciones', 'tipo')) {
+    await db.schema.alterTable('deducciones', t => {
+      t.enum('tipo', ['embargo', 'libranza', 'cooperativa', 'alimentos', 'prestamo', 'otro'])
+        .notNullable().defaultTo('otro')
+    })
+    console.log('  ~ deducciones.tipo')
   }
 
   if (!await db.schema.hasTable('incapacidades')) {
@@ -458,6 +704,11 @@ export async function runMigrations() {
       t.timestamps(true, true)
     })
     console.log('  + incapacidades')
+  }
+  const [incTipo] = await db.raw(`SHOW COLUMNS FROM incapacidades LIKE 'tipo'`)
+  if (incTipo?.[0] && !String(incTipo[0].Type).includes('paternidad')) {
+    await db.raw(`ALTER TABLE incapacidades MODIFY COLUMN tipo ENUM('comun','laboral','maternidad','paternidad','no_remunerada','otra') NULL DEFAULT 'comun'`)
+    console.log('  ~ incapacidades.tipo')
   }
 
   // Planillas PILA de seguridad social
@@ -676,6 +927,76 @@ export async function runMigrations() {
       t.index(['recurso', 'created_at'])
     })
     console.log('  + auditorias')
+  }
+
+  // Catalogo configurable de tipos de documento (admin lo gestiona en Configuración)
+  if (!await db.schema.hasTable('documento_tipos')) {
+    await db.schema.createTable('documento_tipos', t => {
+      t.increments('id')
+      t.string('nombre', 150).notNullable()
+      t.string('descripcion', 500).nullable()
+      t.integer('orden').defaultTo(1)
+      t.boolean('activo').defaultTo(true)
+      t.timestamps(true, true)
+    })
+    console.log('  + documento_tipos')
+  }
+  if (await db.schema.hasTable('documento_tipos')) {
+    const n = await db('documento_tipos').count('id as n').first()
+    if (Number(n.n) === 0) {
+      await db('documento_tipos').insert([
+        { nombre: 'Contratos', orden: 1 },
+        { nombre: 'Reglamento interno', orden: 2 },
+        { nombre: 'Manual de funciones', orden: 3 },
+        { nombre: 'Quejas o reclamaciones', orden: 4 },
+        { nombre: 'Horarios laborales', orden: 5 },
+      ])
+      console.log('  ~ documento_tipos seed')
+    }
+  }
+
+  // Documentos: clasificacion por tipo + version + fecha de emision + estatus de revision
+  if (!await db.schema.hasColumn('documentos', 'tipo_id')) {
+    await db.schema.alterTable('documentos', t => {
+      t.integer('tipo_id').unsigned().references('id').inTable('documento_tipos').onDelete('SET NULL').nullable().index()
+    })
+    console.log('  ~ documentos.tipo_id')
+  }
+  if (!await db.schema.hasColumn('documentos', 'version')) {
+    await db.schema.alterTable('documentos', t => t.string('version', 30).nullable())
+    console.log('  ~ documentos.version')
+  }
+  if (!await db.schema.hasColumn('documentos', 'fecha_emision')) {
+    await db.schema.alterTable('documentos', t => t.date('fecha_emision').nullable())
+    console.log('  ~ documentos.fecha_emision')
+  }
+  if (!await db.schema.hasColumn('documentos', 'estatus')) {
+    await db.schema.alterTable('documentos', t => {
+      t.enum('estatus', ['recibido', 'en_revision', 'rechazado']).notNullable().defaultTo('recibido')
+    })
+    console.log('  ~ documentos.estatus')
+  }
+
+  // Solicitudes: fecha de entrega y observaciones que define el admin
+  if (!await db.schema.hasColumn('solicitudes', 'fecha_entrega')) {
+    await db.schema.alterTable('solicitudes', t => t.date('fecha_entrega').nullable())
+    console.log('  ~ solicitudes.fecha_entrega')
+  }
+  if (!await db.schema.hasColumn('solicitudes', 'observaciones')) {
+    await db.schema.alterTable('solicitudes', t => t.text('observaciones').nullable())
+    console.log('  ~ solicitudes.observaciones')
+  }
+
+  // Solicitudes: archivo de respuesta/documento que el admin entrega al cliente
+  if (!await db.schema.hasColumn('solicitudes', 'respuesta_path')) {
+    await db.schema.alterTable('solicitudes', t => {
+      t.string('respuesta_path', 255).nullable()
+      t.string('respuesta_nombre', 255).nullable()
+      t.string('respuesta_mime', 120).nullable()
+      t.integer('respuesta_size').unsigned().nullable()
+      t.timestamp('respuesta_at').nullable()
+    })
+    console.log('  ~ solicitudes.respuesta_*')
   }
 
   if (!await db.schema.hasTable('observaciones')) {
@@ -1085,6 +1406,65 @@ export async function runMigrations() {
       t.timestamps(true, true)
     })
     console.log('  + refresh_tokens')
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // PILA — FASE 3A: campos que exige el anexo técnico (Res. 2388/2016).
+  // Los codigo_pila quedan NULL: el admin los carga desde la tabla oficial
+  // del operador (SOI/Aportes en Línea/Mi Planilla/Asopagos). No se
+  // precargan códigos: un código erróneo hace rechazar el archivo completo.
+  // ══════════════════════════════════════════════════════════════════
+
+  for (const tabla of ['eps', 'arl', 'pensiones', 'cajas_compensacion']) {
+    if (await db.schema.hasTable(tabla) && !await db.schema.hasColumn(tabla, 'codigo_pila')) {
+      await db.schema.alterTable(tabla, t => { t.string('codigo_pila', 6).nullable() })
+      console.log(`  ~ ${tabla}.codigo_pila`)
+    }
+  }
+  for (const col of ['arl_id', 'eps_id']) {
+    if (!await db.schema.hasColumn('empresas', col)) {
+      await db.schema.alterTable('empresas', t => { t.integer(col).unsigned().nullable() })
+      console.log(`  ~ empresas.${col}`)
+    }
+  }
+  const empleadoPilaCols = {
+    tipo_cotizante: t => t.string('tipo_cotizante', 2).nullable(),
+    subtipo_cotizante: t => t.string('subtipo_cotizante', 2).nullable(),
+    tipo_trabajador: t => t.string('tipo_trabajador', 1).nullable(),
+    subtipo_trabajador: t => t.string('subtipo_trabajador', 1).nullable(),
+    // Solo afectan el archivo PILA; no cambian el cálculo de nómina
+    salario_integral: t => t.boolean('salario_integral').notNullable().defaultTo(false),
+    extranjero_sin_pension: t => t.boolean('extranjero_sin_pension').notNullable().defaultTo(false),
+    colombiano_exterior: t => t.boolean('colombiano_exterior').notNullable().defaultTo(false),
+    // CST art. 192: con salario variable las vacaciones se liquidan con el
+    // promedio del último año; con salario fijo, el ordinario vigente.
+    salario_variable: t => t.boolean('salario_variable').notNullable().defaultTo(false),
+  }
+  for (const [col, fn] of Object.entries(empleadoPilaCols)) {
+    if (!await db.schema.hasColumn('empleados', col)) {
+      await db.schema.alterTable('empleados', t => fn(t))
+      console.log(`  ~ empleados.${col}`)
+    }
+  }
+  if (!await db.schema.hasColumn('departamentos', 'codigo_dane')) {
+    await db.schema.alterTable('departamentos', t => { t.string('codigo_dane', 2).nullable() })
+    console.log('  ~ departamentos.codigo_dane')
+  }
+  if (!await db.schema.hasColumn('ciudades', 'codigo_dane')) {
+    await db.schema.alterTable('ciudades', t => { t.string('codigo_dane', 3).nullable() })
+    console.log('  ~ ciudades.codigo_dane')
+  }
+  if (!await db.schema.hasColumn('cargos', 'codigo_ciuo')) {
+    await db.schema.alterTable('cargos', t => { t.string('codigo_ciuo', 8).nullable() })
+    console.log('  ~ cargos.codigo_ciuo')
+  }
+  if (!await db.schema.hasColumn('sucursales', 'codigo_pila')) {
+    await db.schema.alterTable('sucursales', t => { t.string('codigo_pila', 5).nullable() })
+    console.log('  ~ sucursales.codigo_pila')
+  }
+  if (!await db.schema.hasColumn('incapacidades', 'numero_autorizacion')) {
+    await db.schema.alterTable('incapacidades', t => { t.string('numero_autorizacion', 11).nullable() })
+    console.log('  ~ incapacidades.numero_autorizacion')
   }
 
   console.log('Migraciones completadas.')
