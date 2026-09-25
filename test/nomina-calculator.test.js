@@ -142,6 +142,32 @@ test('salario integral: IBC al 70%, sin provisiones excepto vacaciones, con aler
   assert.ok(JSON.parse(integral.alertas).some(a => a.includes('Salario integral')))
 })
 
+test('salario integral: base de vacaciones parametrizable por vigencia', () => {
+  const e = trabajador({ salario_base: params.salario_minimo * 13 })
+  const input = { salario_integral: true }
+  const p70 = liquidarEmpleado(e, input, params)
+  const p100 = liquidarEmpleado(e, input, { ...params, vacaciones_base_integral_pct: 100 })
+  const p50 = liquidarEmpleado(e, input, { ...params, vacaciones_base_integral_pct: 50 })
+  // La parametrización mueve la base; el valor concreto queda PENDIENTE_VERIFICAR
+  assert.ok(p100.vacaciones > p70.vacaciones)
+  assert.ok(p50.vacaciones < p70.vacaciones)
+})
+
+test('salario base inferior al SMMLV genera alerta y persiste el motivo', () => {
+  const bajo = liquidarEmpleado(trabajador({ salario_base: 1000000 }), {
+    salario_menor_motivo: 'Medio tiempo pactado',
+  }, params)
+  assert.ok(JSON.parse(bajo.alertas).some(a => a.includes('SMMLV')))
+  assert.equal(bajo.salario_menor_motivo, 'Medio tiempo pactado')
+
+  // Salario >= SMMLV: sin alerta y motivo no se persiste
+  const normal = liquidarEmpleado(trabajador({ salario_base: 2000000 }), {
+    salario_menor_motivo: 'texto que no aplica',
+  }, params)
+  assert.ok(!JSON.parse(normal.alertas || '[]').some(a => a.includes('SMMLV')))
+  assert.equal(normal.salario_menor_motivo, null)
+})
+
 test('embargo que supera la quinta parte del excedente genera alerta sin bloquear', () => {
   const salario = 2000000
   // Excedente sobre SMMLV: 2000000 - 1750905 = 249095 → tope 1/5 = 49819
@@ -327,6 +353,21 @@ test('ingreso_noc marcado como INCR fiscal reduce la base de retención', () => 
   const gravable = liquidarEmpleado(trabajador({ salario_base: salario }), { ingreso_noc: 4000000 }, params)
   const incr = liquidarEmpleado(trabajador({ salario_base: salario }), { ingreso_noc: 4000000, ingreso_noc_incr: true }, params)
   assert.ok(incr.retencion_calculada < gravable.retencion_calculada)
+})
+
+test('flag INCR con monto plano 0 queda limpio (sin flag ni motivo)', () => {
+  const r = liquidarEmpleado(trabajador({ salario_base: 2000000 }), {
+    ingreso_noc: 0, ingreso_noc_incr: true, ingreso_noc_incr_motivo: 'sobró del diálogo',
+  }, params)
+  assert.equal(r.ingreso_noc_incr, 0)
+  assert.equal(r.ingreso_noc_incr_motivo, null)
+
+  // El flag sí persiste cuando hay monto plano > 0
+  const conMonto = liquidarEmpleado(trabajador({ salario_base: 2000000 }), {
+    ingreso_noc: 100000, ingreso_noc_incr: true, ingreso_noc_incr_motivo: 'Viáticos',
+  }, params)
+  assert.equal(conMonto.ingreso_noc_incr, 1)
+  assert.equal(conMonto.ingreso_noc_incr_motivo, 'Viáticos')
 })
 
 test('retencionMensual devuelve cero sin UVT o base', () => {

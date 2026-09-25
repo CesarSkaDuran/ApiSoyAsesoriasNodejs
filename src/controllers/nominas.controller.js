@@ -299,6 +299,53 @@ export async function liquidar(req, res) {
     })
   }
 
+  // Salario base menor al SMMLV vigente exige motivo obligatorio
+  // (CST art. 143 — ej. medio tiempo, contrato especial). El motivo puede
+  // venir del input de liquidación o de la ficha del empleado. La liquidación
+  // prosigue con alerta persistida, pero el motivo bloquea el guardado.
+  const smmlvVigente = Number(parametros.salario_minimo) || 0
+  const bajoMinimoSinMotivo = empleados.filter(e => {
+    if (!smmlvVigente || Number(e.salario_base) >= smmlvVigente) return false
+    const sub = items.find(i => Number(i.empleado_id) === e.id) || {}
+    return !String(sub.salario_menor_motivo || '').trim()
+      && !String(e.salario_menor_motivo || '').trim()
+  })
+  if (bajoMinimoSinMotivo.length) {
+    return res.status(400).json({
+      error: 'Salario inferior al SMMLV requiere motivo',
+      empleados_bloqueados: bajoMinimoSinMotivo.map(e => ({
+        id: e.id,
+        nombre: [e.primer_nombre, e.primer_apellido].filter(Boolean).join(' ').trim(),
+        documento: e.numero_documento,
+        salario: Number(e.salario_base),
+      })),
+    })
+  }
+
+  // Elegibilidad del salario integral (CST art. 132): piso = 10 SMMLV ×
+  // (1 + factor prestacional de la empresa). Bloqueante en liquidación
+  // también — un empleado pudo quedar flagged antes de un cambio de salario.
+  const esIntegral = e => e.salario_integral === true || e.salario_integral === 1
+  const conIntegral = empleados.filter(esIntegral)
+  if (conIntegral.length && smmlvVigente) {
+    const empresa = await db('empresas').where('id', nomina.empresa_id).first()
+    const factor = Number(empresa?.factor_prestacional_pct ?? 30)
+    const pisoIntegral = smmlvVigente * 10 * (1 + factor / 100)
+    const invalidos = conIntegral.filter(e => Number(e.salario_base) < pisoIntegral)
+    if (invalidos.length) {
+      return res.status(400).json({
+        error: `Salario integral por debajo del mínimo legal (≥ $${Math.round(pisoIntegral).toLocaleString('es-CO')}, CST art. 132)`,
+        empleados_integral_invalidos: invalidos.map(e => ({
+          id: e.id,
+          nombre: [e.primer_nombre, e.primer_apellido].filter(Boolean).join(' ').trim(),
+          documento: e.numero_documento,
+          salario: Number(e.salario_base),
+          minimo_requerido: Math.round(pisoIntegral),
+        })),
+      })
+    }
+  }
+
   // Novedades de ausentismo que se cruzan con el período
   const fechas = periodoFechas(nomina)
   const novedadesPorEmpleado = {}
@@ -409,6 +456,8 @@ export async function liquidar(req, res) {
       vacaciones_base: vacBasePorEmpleado[empleado.id]?.base ?? null,
       salario_integral: empleado.salario_integral === true || empleado.salario_integral === 1,
       ibc_mes_anterior: ibcAnteriorPorEmpleado[empleado.id] ?? null,
+      // El motivo de la ficha del empleado respalda el de liquidación
+      salario_menor_motivo: submitted.salario_menor_motivo || empleado.salario_menor_motivo || null,
     }
     const aplicaExoneracion = nomina.aplica_exoneracion === true || nomina.aplica_exoneracion === 1
     const detalle = calcularEmpleado(empleado, input, parametros, aplicaExoneracion)

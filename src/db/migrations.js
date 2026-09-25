@@ -460,6 +460,7 @@ export async function runMigrations() {
     ['retencion_ajuste_motivo', t => t.string('retencion_ajuste_motivo', 300).nullable()],
     ['ingreso_noc_incr', t => t.boolean('ingreso_noc_incr').notNullable().defaultTo(false)],
     ['ingreso_noc_incr_motivo', t => t.string('ingreso_noc_incr_motivo', 300).nullable()],
+    ['salario_menor_motivo', t => t.string('salario_menor_motivo', 300).nullable()],
     ['ingresos_detalle', t => t.json('ingresos_detalle').nullable()],
     ['dias_incapacidad', t => t.decimal('dias_incapacidad', 5, 1).defaultTo(0)],
     ['valor_incapacidad_empleador', t => t.decimal('valor_incapacidad_empleador', 15, 2).defaultTo(0)],
@@ -538,6 +539,9 @@ export async function runMigrations() {
     ['licencia_paternidad_dias', t => t.decimal('licencia_paternidad_dias', 5, 1).notNullable().defaultTo(14)],
     // Salario integral: cotizaciones sobre el 70% (CST 132; Ley 100/93 art. 18)
     ['salario_integral_ibc_pct', t => t.decimal('salario_integral_ibc_pct', 7, 4).notNullable().defaultTo(70)],
+    // Base de vacaciones para integral: PENDIENTE_VERIFICAR con contador
+    // (CST 132 exceptúa vacaciones de la integración; default 70%)
+    ['vacaciones_base_integral_pct', t => t.decimal('vacaciones_base_integral_pct', 7, 4).notNullable().defaultTo(70)],
   ]
   for (const [column, add] of nominaParamColumns) {
     if (!await db.schema.hasColumn('nomina_parametros', column)) {
@@ -1427,6 +1431,14 @@ export async function runMigrations() {
       console.log(`  ~ empresas.${col}`)
     }
   }
+  // CST art. 132: factor prestacional por empresa (mínimo legal 30%);
+  // piso del salario integral = 10 SMMLV × (1 + factor/100).
+  if (!await db.schema.hasColumn('empresas', 'factor_prestacional_pct')) {
+    await db.schema.alterTable('empresas', t => {
+      t.decimal('factor_prestacional_pct', 5, 2).notNullable().defaultTo(30)
+    })
+    console.log('  ~ empresas.factor_prestacional_pct')
+  }
   const empleadoPilaCols = {
     tipo_cotizante: t => t.string('tipo_cotizante', 2).nullable(),
     subtipo_cotizante: t => t.string('subtipo_cotizante', 2).nullable(),
@@ -1439,6 +1451,8 @@ export async function runMigrations() {
     // CST art. 192: con salario variable las vacaciones se liquidan con el
     // promedio del último año; con salario fijo, el ordinario vigente.
     salario_variable: t => t.boolean('salario_variable').notNullable().defaultTo(false),
+    // CST art. 143: salario bajo el SMMLV exige soporte (medio tiempo, etc.)
+    salario_menor_motivo: t => t.string('salario_menor_motivo', 300).nullable(),
   }
   for (const [col, fn] of Object.entries(empleadoPilaCols)) {
     if (!await db.schema.hasColumn('empleados', col)) {
@@ -1465,6 +1479,36 @@ export async function runMigrations() {
   if (!await db.schema.hasColumn('incapacidades', 'numero_autorizacion')) {
     await db.schema.alterTable('incapacidades', t => { t.string('numero_autorizacion', 11).nullable() })
     console.log('  ~ incapacidades.numero_autorizacion')
+  }
+
+  // Calidad de datos: nombres de empleados en mayúsculas sin espacios
+  // sobrantes (idempotente; MySQL UPPER cubre tildes/ñ en utf8mb4).
+  for (const col of ['primer_nombre', 'segundo_nombre', 'primer_apellido', 'segundo_apellido']) {
+    const upd = await db('empleados')
+      .whereNotNull(col)
+      .whereRaw(`${col} != UPPER(TRIM(${col})) OR ${col} LIKE '%  %'`)
+      .update({ [col]: db.raw(`REPLACE(REPLACE(UPPER(TRIM(${col})), '  ', ' '), '  ', ' ')`) })
+    if (upd) console.log(`  ~ empleados.${col} normalizado (${upd})`)
+  }
+
+  // Fixture SMMLV (idempotente): en ambientes recreados desde migrate-legacy,
+  // los empleados de prueba quedan en SMMLV con motivo 'dato de prueba'.
+  // Solo JHON SANJUAN (1042) permanece bajo el mínimo con motivo, para que la
+  // regla salario < SMMLV esté cubierta en la suite (ver AGENTS.md).
+  // Guardia: solo toca motivo NULL o 'dato de prueba' — un motivo real
+  // (ej. 'medio tiempo') nunca se pisa ni se "corrige" su salario.
+  const smmlvRow = await db('nomina_parametros').orderBy('vigencia', 'desc').first()
+  const smmlvMin = Number(smmlvRow?.salario_minimo) || 0
+  if (smmlvMin) {
+    const bajoPrueba = db('empleados')
+      .where('salario_base', '<', smmlvMin)
+      .where('salario_base', '>', 0)
+      .where(q => q.whereNull('salario_menor_motivo').orWhere('salario_menor_motivo', 'dato de prueba'))
+    const subidos = await bajoPrueba.clone().whereNot('id', 1042)
+      .update({ salario_base: smmlvMin, salario_menor_motivo: 'dato de prueba' })
+    const jhon = await bajoPrueba.clone().where('id', 1042)
+      .update({ salario_menor_motivo: 'dato de prueba' })
+    if (subidos || jhon) console.log(`  ~ fixture SMMLV (subidos ${subidos}, jhon ${jhon})`)
   }
 
   console.log('Migraciones completadas.')

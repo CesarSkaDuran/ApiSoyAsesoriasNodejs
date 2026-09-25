@@ -209,6 +209,15 @@ export function liquidarEmpleado(empleado, input = {}, params, aplicaExoneracion
   if (nov.diasVacaciones && !baseVacaciones && input.vacaciones_base_manual) {
     alertas.push('Vacaciones liquidadas con base manual sin histórico de nómina — revisar el motivo registrado')
   }
+  // Salario base inferior al SMMLV vigente (CST art. 143): solo es válido en
+  // casos excepcionales (medio tiempo, contrato especial). Alerta, no bloqueo;
+  // el motivo es obligatorio y se valida en el endpoint de liquidación.
+  const smmlvVigente = Number(params.salario_minimo) || 0
+  const bajoMinimo = smmlvVigente > 0 && salarioMensual < smmlvVigente
+  if (bajoMinimo) {
+    alertas.push(`Salario base (${round2(salarioMensual)}) inferior al SMMLV vigente (${round2(smmlvVigente)}): ${String(input.salario_menor_motivo || '').trim() || 'sin motivo registrado'} — verificar soporte (medio tiempo / contrato especial)`)
+  }
+
   const diasTrabajados = Math.max(0, dias - nov.diasIncapacidad - nov.diasVacaciones)
   const salario = salarioMensual * diasTrabajados / 30
   const valorIncapacidad = nov.valorEmpleador + nov.valorTercero
@@ -345,7 +354,8 @@ export function liquidarEmpleado(empleado, input = {}, params, aplicaExoneracion
     Number(params.salario_minimo) * Number(params.max_ibc_smmlv || 25) * dias / 30,
   )
   if (esIntegral) {
-    alertas.push('Salario integral: IBC al 70% (Ley 100 art. 18), prima/cesantías/intereses no provisionados (compensados en el factor prestacional, CST 132); vacaciones provisionadas sobre el IBC — requiere verificación manual del contador.')
+    const pctVacInt = Number(params.vacaciones_base_integral_pct ?? 70)
+    alertas.push(`Salario integral: IBC al 70% (Ley 100 art. 18), prima/cesantías/intereses no provisionados (compensados en el factor prestacional, CST 132); vacaciones provisionadas sobre ${pctVacInt}% de la base (PENDIENTE_VERIFICAR contador); parafiscales sin reducción (PENDIENTE_VERIFICAR CST 132 num. 3 / C-988-99).`)
   }
 
   // Licencia no remunerada (SLN): por los días suspendidos el empleador sigue
@@ -402,10 +412,13 @@ export function liquidarEmpleado(empleado, input = {}, params, aplicaExoneracion
   const prima = esIntegral ? 0 : basePrestaciones * Number(params.prima_pct) / 100
   const cesantias = esIntegral ? 0 : basePrestaciones * Number(params.cesantias_pct) / 100
   const intereses = esIntegral ? 0 : basePrestaciones * Number(params.intereses_cesantias_pct_anual) / 100 / 12
-  // Vacaciones sobre el IBC (70% del salario) cuando es integral; base normal
-  // si no. NOTA PENDIENTE_VERIFICAR: el CST 132 exceptúa las vacaciones de la
-  // integración, lo que sugiere base = salario integral completo.
-  const vacaciones = (esIntegral ? ibc : salario + valorVacaciones + valorIncapacidad + horas + otros + excedenteNoSalarial) * Number(params.vacaciones_pct) / 100
+  // Vacaciones cuando es integral: base = salarial × vacaciones_base_integral_pct
+  // (default 70%). PENDIENTE_VERIFICAR: el CST 132 exceptúa las vacaciones de
+  // la integración, lo que podría implicar base = salario integral completo
+  // (100%). Parafiscales sin reducción para integral — PENDIENTE_VERIFICAR
+  // (CST 132 num. 3 / C-988-99); el cálculo actual no se toca.
+  const baseVacIntegral = baseIbc * Number(params.vacaciones_base_integral_pct ?? 70) / 100
+  const vacaciones = (esIntegral ? baseVacIntegral : salario + valorVacaciones + valorIncapacidad + horas + otros + excedenteNoSalarial) * Number(params.vacaciones_pct) / 100
 
   const totalDevengado = salario + valorVacaciones + valorIncapacidad + aux + horas + otros + ingresoNoc + indemnizacion
   const totalDeducciones = deduccionSalud + deduccionPension + fsp + deducciones + retencion
@@ -452,8 +465,13 @@ export function liquidarEmpleado(empleado, input = {}, params, aplicaExoneracion
     horas_extras: round2(horas),
     otros_ingresos: round2(otros),
     ingreso_noc: round2(ingresoNoc),
-    ingreso_noc_incr: input.ingreso_noc_incr ? 1 : 0,
-    ingreso_noc_incr_motivo: input.ingreso_noc_incr_motivo || null,
+    // El flag INCR solo aplica al ingreso no constitutivo plano (los tipificados
+    // llevan su propio tratamiento). Si el monto plano es 0, el flag queda
+    // sucio sin efecto → se limpia aquí.
+    ingreso_noc_incr: amount(input.ingreso_noc) > 0 && input.ingreso_noc_incr ? 1 : 0,
+    ingreso_noc_incr_motivo: amount(input.ingreso_noc) > 0 && input.ingreso_noc_incr
+      ? input.ingreso_noc_incr_motivo || null
+      : null,
     ingresos_detalle: JSON.stringify(ingresosDetalle),
     indemnizacion: round2(indemnizacion),
     valor_vacaciones: round2(valorVacaciones),
@@ -480,6 +498,7 @@ export function liquidarEmpleado(empleado, input = {}, params, aplicaExoneracion
     retencion_calculada: round2(ret.retencion),
     retencion_ajuste: round2(retAjuste),
     retencion_ajuste_motivo: retAjuste ? String(input.retencion_ajuste_motivo || '').slice(0, 300) || null : null,
+    salario_menor_motivo: bajoMinimo ? String(input.salario_menor_motivo || '').slice(0, 300) || null : null,
     total_devengado: round2(totalDevengado),
     total_deducciones: round2(totalDeducciones),
     total_aportes_empleador: round2(totalAportesEmpleador),

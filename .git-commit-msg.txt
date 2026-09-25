@@ -1,0 +1,19 @@
+Nomina: SMMLV con motivo y elegibilidad de salario integral (CST 132/143)
+
+- Bloqueo 400 de liquidación por salario < SMMLV ahora devuelve
+  empleados_bloqueados con id/nombre/documento/salario; el motivo de la
+  ficha del empleado (salario_menor_motivo) respalda el del input
+- Empleado: validación de motivo al guardar cuando salario < SMMLV
+- Salario integral: mínimo 10 SMMLV × (1 + factor prestacional de la
+  empresa, default 30%) validado en ficha y liquidación
+  (empleados_integral_invalidos); factor validado 30-100, cambio que
+  invalida integrales devuelve 409 salvo forzar_cambio_factor
+- Vacaciones de integral sobre vacaciones_base_integral_pct (default 70,
+  PENDIENTE_VERIFICAR); parafiscales sin reducción (PENDIENTE_VERIFICAR)
+- Fixture SMMLV idempotente en migraciones (JHON 1042 queda bajo el
+  mínimo intencionalmente); AGENTS.md documenta reglas y fixtures
+- Tests: empleados-integral.test.js + casos de motivo/parametrización
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>

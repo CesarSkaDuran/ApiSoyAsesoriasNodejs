@@ -6,6 +6,11 @@ import db from '../src/db/knex.js'
 let nominaId
 let incapacidadId
 
+async function smmlvVigente() {
+  const p = await db('nomina_parametros').where('vigencia', 2026).first()
+  return Number(p?.salario_minimo) || 0
+}
+
 test('crea y liquida un período quincenal con deducciones separadas y snapshot anual', async () => {
   const { token } = await loginAs(ADMIN)
   const empleado = await db('empleados')
@@ -25,7 +30,7 @@ test('crea y liquida un período quincenal con deducciones separadas y snapshot 
   assert.equal(Number(created.data.nomina.dias_periodo), 15)
 
   const liquidated = await api.put(`/nominas/${nominaId}/liquidar`, {
-    empleados: [{ empleado_id: empleado.id }],
+    empleados: [{ empleado_id: empleado.id, salario_menor_motivo: 'Empleado de prueba' }],
   }, { token })
   assert.equal(liquidated.status, 200, JSON.stringify(liquidated.data))
   const detail = liquidated.data.detalles[0]
@@ -74,6 +79,7 @@ test('liquida incapacidad del período y horas por tipo con retención calculada
       empleado_id: empleado.id,
       horas: [{ tipo: 'diurna', cantidad: 2, fecha: '2026-03-10' }],
       retencion_ajuste: 0,
+      salario_menor_motivo: 'Empleado de prueba',
     }],
   }, { token })
   assert.equal(liquidated.status, 200, JSON.stringify(liquidated.data))
@@ -129,13 +135,17 @@ test('liquida ingresos tipificados por concepto y exige motivo para INCR manual'
 
   // INCR manual sin motivo → bloqueado
   const sinMotivo = await api.put(`/nominas/${id}/liquidar`, {
-    empleados: [{ empleado_id: empleado.id, ingreso_noc: 500000, ingreso_noc_incr: true }],
+    empleados: [{
+      empleado_id: empleado.id, ingreso_noc: 500000, ingreso_noc_incr: true,
+      salario_menor_motivo: 'Empleado de prueba',
+    }],
   }, { token })
   assert.equal(sinMotivo.status, 400)
 
   const liquidated = await api.put(`/nominas/${id}/liquidar`, {
     empleados: [{
       empleado_id: empleado.id,
+      salario_menor_motivo: 'Empleado de prueba',
       ingreso_noc: 100000,
       ingreso_noc_incr: true,
       ingreso_noc_incr_motivo: 'viáticos sin tipificar',
@@ -167,6 +177,72 @@ test('liquida ingresos tipificados por concepto y exige motivo para INCR manual'
   await db('horas_extras').where('nomina_id', id).delete()
   await db('planillas').where('nomina_id', id).delete()
   await db('nominas').where('id', id).delete()
+})
+
+// FIXTURE: JHON SANJUAN (empleado 1042, empresa 1) queda intencionalmente
+// con salario_base < SMMLV y motivo 'dato de prueba' en su ficha, para que
+// la regla SMMLV (alerta + motivo obligatorio) esté cubierta en el día a
+// día de la suite. Todos los demás empleados activos están en SMMLV o más.
+// No "corregir" su salario sin ajustar este test.
+test('salario inferior al SMMLV exige motivo y queda en alertas', async (t) => {
+  const { token } = await loginAs(ADMIN)
+  const minimo = await smmlvVigente()
+  const empleado = await db('empleados')
+    .where('empresa_id', 1)
+    .where('salario_base', '>', 0)
+    .where('salario_base', '<', minimo)
+    .whereIn('riesgo', ['I', 'II', 'III', 'IV', 'V'])
+    .where(builder => builder.whereNull('tipo_contrato').orWhereNot('tipo_contrato', 'prestacion'))
+    .first()
+  if (!empleado) return t.skip('sin empleado bajo el SMMLV en datos de prueba')
+  // El motivo de la ficha respalda el input: se limpia para probar el bloqueo
+  const motivoFicha = empleado.salario_menor_motivo ?? null
+  await db('empleados').where('id', empleado.id).update({ salario_menor_motivo: null })
+
+  const created = await api.post('/nominas', {
+    empresa_id: 1,
+    nombre_periodo: `Test SMMLV ${Date.now()} 2026`,
+    vigencia: 2026,
+    dias_periodo: 15,
+  }, { token })
+  assert.equal(created.status, 201)
+  const id = created.data.nomina.id
+
+  // Salario < SMMLV + sin motivo → NO puede liquidar (400 con estructura de nombres)
+  const sinMotivo = await api.put(`/nominas/${id}/liquidar`, {
+    empleados: [{ empleado_id: empleado.id }],
+  }, { token })
+  assert.equal(sinMotivo.status, 400)
+  assert.match(sinMotivo.data.error, /SMMLV/)
+  const bloqueado = sinMotivo.data.empleados_bloqueados?.find(b => b.id === empleado.id)
+  assert.ok(bloqueado, 'empleados_bloqueados debe listar al empleado')
+  assert.ok(bloqueado.nombre, 'debe incluir el nombre')
+  assert.equal(bloqueado.documento, empleado.numero_documento)
+  assert.equal(Number(bloqueado.salario), Number(empleado.salario_base))
+
+  // Salario < SMMLV + motivo en el input → puede liquidar y el motivo persiste
+  const ok = await api.put(`/nominas/${id}/liquidar`, {
+    empleados: [{ empleado_id: empleado.id, salario_menor_motivo: 'Medio tiempo pactado' }],
+  }, { token })
+  assert.equal(ok.status, 200, JSON.stringify(ok.data))
+  const detail = ok.data.detalles[0]
+  assert.equal(detail.salario_menor_motivo, 'Medio tiempo pactado')
+  const alertas = typeof detail.alertas === 'string' ? JSON.parse(detail.alertas) : detail.alertas
+  assert.ok(alertas.some(a => a.includes('SMMLV')))
+
+  // Motivo en la ficha del empleado → también desbloquea y persiste
+  await db('empleados').where('id', empleado.id).update({ salario_menor_motivo: 'dato de prueba' })
+  const okFicha = await api.put(`/nominas/${id}/liquidar`, {
+    empleados: [{ empleado_id: empleado.id }],
+  }, { token })
+  assert.equal(okFicha.status, 200, JSON.stringify(okFicha.data))
+  assert.equal(okFicha.data.detalles[0].salario_menor_motivo, 'dato de prueba')
+
+  await db('nomina_detalles').where('nomina_id', id).delete()
+  await db('horas_extras').where('nomina_id', id).delete()
+  await db('planillas').where('nomina_id', id).delete()
+  await db('nominas').where('id', id).delete()
+  await db('empleados').where('id', empleado.id).update({ salario_menor_motivo: motivoFicha })
 })
 
 test.after(async () => {

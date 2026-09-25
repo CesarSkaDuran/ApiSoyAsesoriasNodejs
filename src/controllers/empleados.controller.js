@@ -11,7 +11,60 @@ const CAMPOS = [
   // Datos PILA (Res. 2388/2016) — solo alimentan el archivo plano
   'tipo_cotizante', 'subtipo_cotizante', 'tipo_trabajador', 'subtipo_trabajador',
   'salario_integral', 'extranjero_sin_pension', 'colombiano_exterior', 'salario_variable',
+  'salario_menor_motivo',
 ]
+
+// SMMLV de la última vigencia configurada (para la regla de salario bajo mínimo)
+async function smmlvVigente() {
+  const p = await db('nomina_parametros').orderBy('vigencia', 'desc').first()
+  return Number(p?.salario_minimo) || 0
+}
+
+// Salario bajo el SMMLV exige motivo en la ficha (CST art. 143)
+async function validarSalarioMinimo(res, salario, motivo) {
+  const minimo = await smmlvVigente()
+  if (minimo && Number(salario) < minimo && !String(motivo || '').trim()) {
+    res.status(400).json({
+      error: 'Salario inferior al SMMLV vigente requiere salario_menor_motivo (ej. medio tiempo, contrato especial)',
+    })
+    return false
+  }
+  return true
+}
+
+// Salario integral (CST art. 132): piso = 10 SMMLV × (1 + factor
+// prestacional de la empresa; mínimo legal 30% → piso default 13 SMMLV).
+// Bloqueante: un integral por debajo del piso es jurídicamente inválido.
+async function validarSalarioIntegral(res, empresaId, integral, salario) {
+  const esIntegral = integral === true || integral === 1 || integral === '1' || integral === 'true'
+  if (!esIntegral) return true
+  const minimo = await smmlvVigente()
+  const empresa = await db('empresas').where('id', empresaId).first()
+  const factor = Number(empresa?.factor_prestacional_pct ?? 30)
+  const piso = Math.round(minimo * 10 * (1 + factor / 100))
+  if (minimo && Number(salario) < piso) {
+    res.status(400).json({
+      error: `El salario integral debe ser ≥ $${piso.toLocaleString('es-CO')} (10 SMMLV × (1 + ${factor}% factor prestacional, CST art. 132). Recibido: $${Number(salario || 0).toLocaleString('es-CO')}`,
+    })
+    return false
+  }
+  return true
+}
+
+const NOMBRE_CAMPOS = ['primer_nombre', 'segundo_nombre', 'primer_apellido', 'segundo_apellido']
+
+// Consistencia de datos: nombres en mayúsculas, sin espacios sobrantes
+// (PILA y certificados esperan MAYÚSCULAS). Vacíos quedan en null para
+// que la validación de requeridos siga funcionando.
+function normalizarNombres(data) {
+  for (const campo of NOMBRE_CAMPOS) {
+    if (typeof data[campo] === 'string') {
+      const v = data[campo].trim().replace(/\s+/g, ' ').toUpperCase()
+      data[campo] = v || null
+    }
+  }
+  return data
+}
 
 // GET /empleados - scoped: empresa ve solo los suyos; admin filtra por ?empresa_id
 export async function list(req, res) {
@@ -84,9 +137,12 @@ export async function create(req, res) {
   for (const campo of CAMPOS) {
     if (req.body[campo] !== undefined) data[campo] = req.body[campo]
   }
+  normalizarNombres(data)
   if (!data.primer_nombre || !data.numero_documento) {
     return res.status(400).json({ error: 'primer_nombre y numero_documento son requeridos' })
   }
+  if (!await validarSalarioMinimo(res, data.salario_base, data.salario_menor_motivo)) return
+  if (!await validarSalarioIntegral(res, empresaId, data.salario_integral, data.salario_base)) return
 
   try {
     const [id] = await db('empleados').insert(data)
@@ -112,9 +168,15 @@ export async function update(req, res) {
   for (const campo of CAMPOS) {
     if (req.body[campo] !== undefined) data[campo] = req.body[campo]
   }
+  normalizarNombres(data)
   if (Object.keys(data).length === 0) {
     return res.status(400).json({ error: 'Nada que actualizar' })
   }
+  const salario = data.salario_base ?? empleado.salario_base
+  const motivo = data.salario_menor_motivo ?? empleado.salario_menor_motivo
+  if (!await validarSalarioMinimo(res, salario, motivo)) return
+  const integral = data.salario_integral ?? empleado.salario_integral
+  if (!await validarSalarioIntegral(res, empleado.empresa_id, integral, salario)) return
 
   await db('empleados').where('id', empleado.id).update(data)
   const actualizado = await db('empleados').where('id', empleado.id).first()

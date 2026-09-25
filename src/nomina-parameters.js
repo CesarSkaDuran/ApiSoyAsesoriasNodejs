@@ -79,6 +79,9 @@ const PARAMETROS_COMUNES = {
   licencia_paternidad_dias: 14,
   // Salario integral (CST 132; Ley 100/93 art. 18): cotizaciones sobre el 70%
   salario_integral_ibc_pct: 70,
+  // PENDIENTE_VERIFICAR con contador: CST 132 exceptúa vacaciones de la
+  // integración → la base podría ser el salario integral completo (100%)
+  vacaciones_base_integral_pct: 70,
 }
 
 export const NOMINA_PARAMETER_DEFAULTS = {

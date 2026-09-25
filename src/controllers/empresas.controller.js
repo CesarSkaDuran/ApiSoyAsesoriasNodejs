@@ -9,8 +9,21 @@ const CAMPOS = [
   'imagen', 'num_empleados', 'riesgo', 'valor_empleado', 'iva', 'fecha_registro',
   'status', 'observaciones', 'actividad_economica_id', 'departamento_id',
   'ciudad_id', 'caja_compensacion_id', 'exonerado_parafiscales',
-  'arl_id', 'eps_id',
+  'arl_id', 'eps_id', 'factor_prestacional_pct',
 ]
+
+// CST art. 132: el factor prestacional no puede ser menor al 30% legal.
+// Rango superior razonable 100%.
+function validarFactor(res, factor) {
+  const f = Number(factor)
+  if (!(f >= 30 && f <= 100)) {
+    res.status(400).json({
+      error: `El factor prestacional no puede ser menor al 30% ni mayor al 100% (CST art. 132). Recibido: ${factor}%`,
+    })
+    return false
+  }
+  return true
+}
 
 // GET /empresas - admin: todas (con search/paginacion). empresa: solo la suya.
 export async function list(req, res) {
@@ -77,6 +90,7 @@ export async function create(req, res) {
   if (!data.razon_social) {
     return res.status(400).json({ error: 'razon_social es requerida' })
   }
+  if (data.factor_prestacional_pct !== undefined && !validarFactor(res, data.factor_prestacional_pct)) return
 
   const [id] = await db('empresas').insert(data)
   const empresa = await db('empresas').where('id', id).first()
@@ -100,6 +114,39 @@ export async function update(req, res) {
   }
   if (Object.keys(data).length === 0) {
     return res.status(400).json({ error: 'Nada que actualizar' })
+  }
+
+  // Cambio de factor prestacional: valida rango legal y, si sube el piso,
+  // verifica que no invalide empleados con salario integral existentes.
+  if (data.factor_prestacional_pct !== undefined) {
+    if (!validarFactor(res, data.factor_prestacional_pct)) return
+    const actual = await db('empresas').where('id', id).first()
+    const factorNuevo = Number(data.factor_prestacional_pct)
+    if (Number(actual.factor_prestacional_pct) !== factorNuevo) {
+      const p = await db('nomina_parametros').orderBy('vigencia', 'desc').first()
+      const smmlv = Number(p?.salario_minimo) || 0
+      const pisoNuevo = smmlv * 10 * (1 + factorNuevo / 100)
+      const invalidos = await db('empleados')
+        .where('empresa_id', id)
+        .whereIn('salario_integral', [1, true])
+        .where('salario_base', '<', pisoNuevo)
+        .select('id', 'primer_nombre', 'primer_apellido', 'salario_base')
+      if (invalidos.length && req.body.forzar_cambio_factor !== true && req.body.forzar_cambio_factor !== 'true') {
+        const salarios = invalidos.map(e => Number(e.salario_base))
+        return res.status(409).json({
+          error: `Cambiar el factor a ${factorNuevo}% invalida ${invalidos.length} empleado(s) integrales con salario entre $${Math.min(...salarios).toLocaleString('es-CO')} y $${Math.max(...salarios).toLocaleString('es-CO')}. ¿Confirmas el cambio?`,
+          empleados_invalidos: invalidos.map(e => ({
+            id: e.id,
+            nombre: [e.primer_nombre, e.primer_apellido].filter(Boolean).join(' ').trim(),
+            salario: Number(e.salario_base),
+          })),
+          requiere: 'forzar_cambio_factor=true',
+        })
+      }
+      if (invalidos.length) {
+        console.warn(`[empresas] factor_prestacional ${factorNuevo}% forzado en empresa ${id}: ${invalidos.length} integrales quedan bajo el piso`)
+      }
+    }
   }
 
   await db('empresas').where('id', id).update(data)
