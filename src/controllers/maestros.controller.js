@@ -168,6 +168,16 @@ const MAESTROS = {
       { table: 'servicio_registros', col: 'sucursal_id', label: 'registros de servicio' },
     ],
   },
+  lead_fuentes: {
+    label: 'Fuentes de leads', icon: 'megaphone',
+    singular: 'fuente',
+    fields: [txt('nombre', 'Nombre', { required: true }), bool('activo', 'Activo')],
+  },
+  lead_campanas: {
+    label: 'Campañas de leads', icon: 'target',
+    singular: 'campaña',
+    fields: [txt('nombre', 'Nombre', { required: true }), bool('activo', 'Activo')],
+  },
   terceros: {
     label: 'Terceros / Proveedores', icon: 'truck',
     singular: 'tercero',

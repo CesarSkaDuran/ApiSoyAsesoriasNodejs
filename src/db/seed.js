@@ -53,6 +53,13 @@ export async function runSeed() {
     { departamento_id: 6, nombre: 'Bucaramanga' },
   ]) && console.log('  + ciudades')
 
+  // ── Catalogos comerciales (ventas/leads) ────────────────────────────
+  await seedIfEmpty('lead_fuentes', [
+    { nombre: 'Instagram' }, { nombre: 'Facebook' }, { nombre: 'WhatsApp' },
+    { nombre: 'Web pública' }, { nombre: 'Referido' }, { nombre: 'TikTok' },
+    { nombre: 'Llamada' }, { nombre: 'Otro' },
+  ]) && console.log('  + lead_fuentes')
+
   // ── Catalogos de seguridad social ─────────────────────────────────
   await seedIfEmpty('eps', [
     { nombre: 'SURA' }, { nombre: 'Nueva EPS' }, { nombre: 'Sanitas' },

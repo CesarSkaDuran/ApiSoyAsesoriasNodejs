@@ -3,3 +3,5 @@ node_modules/
 storage/documentos/*
 !storage/documentos/.gitkeep
 *.log
+backup_*.json
+backup_*.sql

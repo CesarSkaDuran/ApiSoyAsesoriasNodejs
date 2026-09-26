@@ -10,7 +10,7 @@ import { extname, resolve } from 'path'
 const STORAGE_DIR = resolve(process.env.STORAGE_DIR || 'storage/documentos')
 mkdirSync(STORAGE_DIR, { recursive: true })
 
-const ALLOWED_EXT = ['.pdf', '.jpg', '.jpeg', '.png', '.gif', '.doc', '.docx', '.xls', '.xlsx', '.zip']
+const ALLOWED_EXT = ['.pdf', '.jpg', '.jpeg', '.png', '.gif', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.zip']
 const MAX_SIZE = 20 * 1024 * 1024 // 20 MB
 
 const storage = multer.diskStorage({
@@ -24,7 +24,11 @@ const storage = multer.diskStorage({
 function fileFilter(req, file, cb) {
   const ext = extname(file.originalname).toLowerCase()
   if (!ALLOWED_EXT.includes(ext)) {
-    return cb(new Error(`Tipo de archivo no permitido: ${ext}`))
+    const err = new Error(
+      `Tipo de archivo no permitido: ${ext || '(sin extensión)'}. Permitidos: ${ALLOWED_EXT.join(', ')}`
+    )
+    err.status = 400
+    return cb(err)
   }
   cb(null, true)
 }

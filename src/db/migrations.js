@@ -1178,6 +1178,7 @@ export async function runMigrations() {
       t.string('telefono', 60).nullable()
       t.string('fuente', 120).nullable()
       t.string('campania', 120).nullable()
+      t.decimal('valor_propuesta', 14, 2).nullable()
       t.integer('usuario_asignado_id').unsigned().references('id').inTable('users').onDelete('SET NULL').nullable()
       t.integer('orden_pos').defaultTo(0)
       t.dateTime('ultimo_contacto_en').nullable()
@@ -1190,6 +1191,20 @@ export async function runMigrations() {
       t.timestamps(true, true)
     })
     console.log('  + leads')
+  }
+
+  // Catalogos parametrizables del modulo comercial (se gestionan en
+  // Configuracion > Fuentes de leads / Campañas; el lead guarda el nombre)
+  for (const tabla of ['lead_fuentes', 'lead_campanas']) {
+    if (!await db.schema.hasTable(tabla)) {
+      await db.schema.createTable(tabla, t => {
+        t.increments('id')
+        t.string('nombre', 120).notNullable()
+        t.boolean('activo').notNullable().defaultTo(true)
+        t.timestamps(true, true)
+      })
+      console.log(`  + ${tabla}`)
+    }
   }
 
   if (!await db.schema.hasTable('lead_historial')) {
@@ -1264,7 +1279,7 @@ export async function runMigrations() {
       t.string('slug', 100).notNullable()
       t.string('titulo', 255).notNullable()
       t.text('descripcion').nullable()
-      t.enum('tipo_respuesta', ['texto', 'textarea', 'numero', 'fecha', 'opciones', 'multiple', 'booleano']).notNullable()
+      t.enum('tipo_respuesta', ['texto', 'textarea', 'numero', 'fecha', 'opciones', 'multiple', 'booleano', 'cumplimiento']).notNullable()
       t.text('opciones').nullable()            // JSON array
       t.boolean('es_obligatoria').defaultTo(false)
       t.text('ayuda_contextual').nullable()
@@ -1467,6 +1482,22 @@ export async function runMigrations() {
   if (!await db.schema.hasColumn('ciudades', 'codigo_dane')) {
     await db.schema.alterTable('ciudades', t => { t.string('codigo_dane', 3).nullable() })
     console.log('  ~ ciudades.codigo_dane')
+  }
+  if (!await db.schema.hasColumn('leads', 'valor_propuesta')) {
+    await db.schema.alterTable('leads', t => { t.decimal('valor_propuesta', 14, 2).nullable() })
+    console.log('  ~ leads.valor_propuesta')
+  }
+  // Extiende el enum tipo_respuesta con 'cumplimiento' en BD existentes
+  if (await db.schema.hasTable('diagnostico_preguntas')) {
+    const [colRows] = await db.raw(
+      `SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'diagnostico_preguntas' AND COLUMN_NAME = 'tipo_respuesta'`
+    )
+    const colType = colRows[0]?.COLUMN_TYPE || ''
+    if (colType.startsWith('enum') && !colType.includes('cumplimiento')) {
+      await db.raw(`ALTER TABLE diagnostico_preguntas MODIFY COLUMN tipo_respuesta ENUM('texto','textarea','numero','fecha','opciones','multiple','booleano','cumplimiento') NOT NULL`)
+      console.log('  ~ diagnostico_preguntas.tipo_respuesta +cumplimiento')
+    }
   }
   if (!await db.schema.hasColumn('cargos', 'codigo_ciuo')) {
     await db.schema.alterTable('cargos', t => { t.string('codigo_ciuo', 8).nullable() })

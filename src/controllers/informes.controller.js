@@ -43,7 +43,7 @@ export async function ingresos(req, res) {
   if (agrupar === 'cliente') {
     const data = await query
       .select(
-        'empresas.razon_social as grupo',
+        db.raw("COALESCE(empresas.razon_social, 'Sin cliente') as grupo"),
         db.raw('COUNT(*) as registros'),
         db.raw('SUM(cuentas_cobro.valor_total) as total'),
         db.raw("SUM(CASE WHEN cuentas_cobro.status = 1 THEN cuentas_cobro.valor_total ELSE 0 END) as pagado"),
@@ -56,7 +56,7 @@ export async function ingresos(req, res) {
 
   const data = await query
     .select(
-      db.raw('DATE(cuentas_cobro.fecha) as grupo'),
+      db.raw("COALESCE(DATE(cuentas_cobro.fecha), 'Sin fecha') as grupo"),
       db.raw('COUNT(*) as registros'),
       db.raw('SUM(cuentas_cobro.valor_total) as total'),
     )
@@ -107,7 +107,7 @@ export async function egresos(req, res) {
 
   const data = await query
     .select(
-      db.raw('DATE(gastos.fecha) as grupo'),
+      db.raw("COALESCE(DATE(gastos.fecha), 'Sin fecha') as grupo"),
       db.raw('COUNT(*) as registros'),
       db.raw('SUM(gastos.valor) as total'),
     )

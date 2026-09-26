@@ -10,7 +10,7 @@ import { resolve } from 'path'
 
 const ESTADOS = ['pendiente', 'en_progreso', 'logrado', 'cancelado']
 const DOC_ESTADOS = ['pendiente', 'revisar', 'aprobado', 'rechazado', 'renovar']
-const TIPOS_RESPUESTA = ['texto', 'textarea', 'numero', 'fecha', 'opciones', 'multiple', 'booleano']
+const TIPOS_RESPUESTA = ['texto', 'textarea', 'numero', 'fecha', 'opciones', 'multiple', 'booleano', 'cumplimiento']
 
 const STORAGE_DIR = resolve(process.env.STORAGE_DIR || 'storage/documentos')
 

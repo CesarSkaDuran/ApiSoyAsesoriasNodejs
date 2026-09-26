@@ -7,13 +7,20 @@ import db from '../db/knex.js'
 
 const LEAD_CAMPOS = [
   'nombre', 'nombre_emprendedor', 'empresa', 'email', 'telefono',
-  'fuente', 'campania', 'usuario_asignado_id', 'notas', 'empresa_id', 'persona_id',
+  'fuente', 'campania', 'valor_propuesta',
+  'usuario_asignado_id', 'notas', 'empresa_id', 'persona_id',
 ]
 
 function leadData(body) {
   const data = {}
   for (const k of LEAD_CAMPOS) {
-    if (body[k] !== undefined) data[k] = body[k] === '' ? null : body[k]
+    if (body[k] === undefined) continue
+    let v = body[k] === '' ? null : body[k]
+    if (k === 'valor_propuesta' && v !== null) {
+      v = Number(v)
+      if (!Number.isFinite(v) || v < 0) v = null
+    }
+    data[k] = v
   }
   return data
 }

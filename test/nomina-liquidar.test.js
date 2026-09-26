@@ -15,6 +15,7 @@ test('crea y liquida un período quincenal con deducciones separadas y snapshot 
   const { token } = await loginAs(ADMIN)
   const empleado = await db('empleados')
     .where('empresa_id', 1)
+    .whereIn('riesgo', ['I', 'II', 'III', 'IV', 'V'])
     .where(builder => builder.whereNull('tipo_contrato').orWhereNot('tipo_contrato', 'prestacion'))
     .first()
   assert.ok(empleado, 'se necesita un empleado activo de la empresa de prueba')
