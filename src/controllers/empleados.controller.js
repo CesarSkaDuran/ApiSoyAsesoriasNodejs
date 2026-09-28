@@ -116,13 +116,31 @@ export async function show(req, res) {
     return res.status(403).json({ error: 'Sin acceso a este empleado' })
   }
 
-  const [beneficiarios, documentos, incapacidades] = await Promise.all([
+  // Nombres de los catálogos para la ficha (la tabla solo guarda ids)
+  const [beneficiarios, documentos, incapacidades, joins] = await Promise.all([
     db('beneficiados').where('empleado_id', empleado.id),
     db('documentos').where('empleado_id', empleado.id).orderBy('id', 'desc'),
     db('incapacidades').where('empleado_id', empleado.id).orderBy('id', 'desc'),
+    db('empleados')
+      .leftJoin('empresas', 'empleados.empresa_id', 'empresas.id')
+      .leftJoin('cargos', 'empleados.cargo_id', 'cargos.id')
+      .leftJoin('eps', 'empleados.eps_id', 'eps.id')
+      .leftJoin('arl', 'empleados.arl_id', 'arl.id')
+      .leftJoin('pensiones', 'empleados.pension_id', 'pensiones.id')
+      .leftJoin('cajas_compensacion', 'empleados.caja_cf_id', 'cajas_compensacion.id')
+      .where('empleados.id', empleado.id)
+      .select(
+        'empresas.razon_social as empresa_nombre',
+        'cargos.nombre as cargo_nombre',
+        'eps.nombre as eps_nombre',
+        'arl.nombre as arl_nombre',
+        'pensiones.nombre as pension_nombre',
+        'cajas_compensacion.nombre as caja_cf_nombre',
+      )
+      .first(),
   ])
 
-  res.json({ empleado, beneficiarios, documentos, incapacidades })
+  res.json({ empleado: { ...empleado, ...joins }, beneficiarios, documentos, incapacidades })
 }
 
 // POST /empleados - empresa_id: admin lo elige; empresa usa el suyo siempre

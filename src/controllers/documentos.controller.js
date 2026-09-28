@@ -9,7 +9,7 @@ const STORAGE_DIR = resolve(process.env.STORAGE_DIR || 'storage/documentos')
 // Tipos de owner permitidos (una sola FK llena por documento)
 const OWNERS = ['empresa_id', 'empleado_id', 'persona_id', 'beneficiado_id', 'planilla_id', 'nomina_id']
 
-const DOC_ESTATUS = ['recibido', 'en_revision', 'rechazado']
+const DOC_ESTATUS = ['recibido', 'en_revision', 'aprobado', 'rechazado']
 
 // Resuelve la empresa dueña de un documento segun el owner
 async function empresaDeOwner(ownerCol, ownerId) {
@@ -165,6 +165,7 @@ export async function update(req, res) {
       const labels = {
         recibido: 'Recibido',
         en_revision: 'En revisión',
+        aprobado: 'Aprobado',
         rechazado: 'Rechazado',
       }
       notificationRows = await createNotifications(trx, userId ? [userId] : [], {
