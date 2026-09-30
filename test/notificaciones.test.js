@@ -5,6 +5,8 @@ import { api, loginAs, ADMIN, EMPRESA, stopApp } from './helpers.js'
 import db from '../src/db/knex.js'
 
 const solicitudIds = []
+const servicioRegistroIds = []
+const servicioNotificacionIds = []
 let personaId
 let independentUserId
 
@@ -12,7 +14,7 @@ test('solicitud aprobada y gestionada notifica al cliente y sincroniza el servic
   const admin = await loginAs(ADMIN)
   const empresa = await loginAs(EMPRESA)
   const directRegistration = await api.post('/servicio-registros', {
-    empresa_id: 1,
+    empresa_id: 2,
     nombre: 'No debe registrarse directamente',
   }, { token: empresa.token })
   assert.equal(directRegistration.status, 403)
@@ -54,6 +56,33 @@ test('solicitud aprobada y gestionada notifica al cliente y sincroniza el servic
   assert.equal(completed.status, 200)
   const finalRequest = await api.get(`/solicitudes/${id}`, { token: empresa.token })
   assert.equal(finalRequest.data.solicitud.status, 'completada')
+})
+
+test('notificacion de un servicio de contratos abre la categoria contratos', async () => {
+  const admin = await loginAs(ADMIN)
+  const empresa = await loginAs(EMPRESA)
+  const contrato = await db('servicios').whereRaw('UPPER(nombre) = ?', ['CONTRATOS']).first('id')
+  assert.ok(contrato, 'el catalogo debe contener el servicio Contratos')
+
+  const created = await api.post('/servicio-registros', {
+    empresa_id: 2,
+    servicio_id: contrato.id,
+    nombre: 'CONTRATOS',
+  }, { token: admin.token })
+  assert.equal(created.status, 201)
+  const serviceId = created.data.registro.id
+  servicioRegistroIds.push(serviceId)
+
+  const updated = await api.put(`/servicio-registros/${serviceId}`, { status: 4 }, { token: admin.token })
+  assert.equal(updated.status, 200)
+
+  const notifications = await api.get('/notificaciones', { token: empresa.token })
+  const notification = notifications.data.data.find(n =>
+    n.tipo === 'servicio' && n.mensaje?.includes('CONTRATOS — Servicio: En trámite')
+  )
+  assert.ok(notification, 'el cliente debe recibir la notificacion del servicio')
+  assert.equal(notification.url, '/admin/servicios/contratos')
+  servicioNotificacionIds.push(notification.id)
 })
 
 test('solicitudes de independientes se notifican a su usuario y conservan el scope', async () => {
@@ -106,5 +135,11 @@ test.after(async () => {
     await db('users').where('id', independentUserId).delete()
   }
   if (personaId) await db('personas').where('id', personaId).delete()
+  if (servicioNotificacionIds.length) {
+    await db('notificaciones').whereIn('id', servicioNotificacionIds).delete()
+  }
+  if (servicioRegistroIds.length) {
+    await db('servicio_registros').whereIn('id', servicioRegistroIds).delete()
+  }
   await stopApp()
 })

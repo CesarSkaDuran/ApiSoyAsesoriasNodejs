@@ -1,7 +1,10 @@
 import db from '../db/knex.js'
+import { notificarAdmins, notificarCambioEstado } from '../services/notificaciones.js'
 
 // Tickets de soporte (viejo soporte). status numerico: 1=Pendiente
 // 2=En proceso 3=Resuelto 4=Cerrado 5=Rechazado
+const ESTADO_LABEL = { 1: 'Pendiente', 2: 'En proceso', 3: 'Resuelto', 4: 'Cerrado', 5: 'Rechazado' }
+const labelEstado = (s) => ESTADO_LABEL[Number(s)] || `Estado ${s}`
 
 // GET /soportes?status=&page=&per_page= - admin ve todos; cliente solo los suyos
 export async function list(req, res) {
@@ -72,6 +75,17 @@ export async function create(req, res) {
   })
   const soporte = await db('soportes').where('id', id).first()
   res.status(201).json({ soporte })
+
+  // Cliente abre ticket -> avisar a los admins (in-app + correo)
+  if (req.user.role !== 'admin') {
+    notificarAdmins({
+      entidad: 'soporte', entidadId: soporte.id,
+      titulo: 'Nuevo ticket de soporte',
+      mensaje: `Ticket #${soporte.id}: ${soporte.asunto || soporte.tipo_servicio || 'Solicitud de soporte'} — ${req.user.email}${soporte.mensaje ? ` — ${soporte.mensaje.slice(0, 200)}` : ''}`,
+      url: '/admin/soportes',
+      userId: req.user.id,
+    })
+  }
 }
 
 // PUT /soportes/:id - admin gestiona el ticket
@@ -93,4 +107,25 @@ export async function update(req, res) {
 
   await db('soportes').where('id', soporte.id).update(data)
   res.json({ soporte: await db('soportes').where('id', soporte.id).first() })
+
+  // Cliente respondio el ticket -> avisar a los admins
+  if (req.user.role !== 'admin' && data.mensaje !== undefined) {
+    notificarAdmins({
+      entidad: 'soporte', entidadId: soporte.id,
+      titulo: 'Respuesta en ticket de soporte',
+      mensaje: `Ticket #${soporte.id}: el cliente actualizó el mensaje — ${String(data.mensaje).slice(0, 200)}`,
+      url: '/admin/soportes',
+      userId: req.user.id,
+    })
+  }
+
+  if (data.status !== undefined && Number(data.status) !== Number(soporte.status)) {
+    notificarCambioEstado({
+      entidad: 'soporte', entidadId: soporte.id,
+      titulo: `Ticket #${soporte.id}`,
+      estadoAnterior: labelEstado(soporte.status), estadoNuevo: labelEstado(data.status),
+      url: '/admin/soportes',
+      userId: soporte.user_id,
+    })
+  }
 }

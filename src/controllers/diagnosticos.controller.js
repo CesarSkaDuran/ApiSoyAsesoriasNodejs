@@ -1,6 +1,7 @@
 import db from '../db/knex.js'
 import { createReadStream, existsSync } from 'fs'
 import { resolve } from 'path'
+import { notificarAdmins, notificarCambioEstado } from '../services/notificaciones.js'
 
 // ════════════════════════════════════════════════════════════════════════════
 // DIAGNÓSTICOS — entrevista + documentos requeridos + informe
@@ -166,6 +167,16 @@ export async function update(req, res) {
   if (data.estado && !ESTADOS.includes(data.estado)) delete data.estado
   await db('diagnosticos').where('id', d.id).update(data)
   res.json(await db('diagnosticos').where('id', d.id).first())
+
+  if (data.estado && data.estado !== d.estado) {
+    notificarCambioEstado({
+      entidad: 'diagnostico', entidadId: d.id,
+      titulo: `Diagnóstico "${d.nombre}"`,
+      estadoAnterior: d.estado, estadoNuevo: data.estado,
+      url: '/admin/diagnosticos',
+      empresaId: d.empresa_id, personaId: d.persona_id,
+    })
+  }
 }
 
 // PUT /diagnosticos/:id/estado — cambio rápido desde el menú
@@ -176,6 +187,16 @@ export async function updateEstado(req, res) {
   if (!ESTADOS.includes(estado)) return res.status(400).json({ message: 'Estado no válido' })
   await db('diagnosticos').where('id', d.id).update({ estado })
   res.json({ ok: true })
+
+  if (estado !== d.estado) {
+    notificarCambioEstado({
+      entidad: 'diagnostico', entidadId: d.id,
+      titulo: `Diagnóstico "${d.nombre}"`,
+      estadoAnterior: d.estado, estadoNuevo: estado,
+      url: '/admin/diagnosticos',
+      empresaId: d.empresa_id, personaId: d.persona_id,
+    })
+  }
 }
 
 // DELETE /diagnosticos/:id
@@ -236,6 +257,17 @@ export async function saveRespuestas(req, res) {
   })
 
   res.json({ ok: true })
+
+  // Cliente diligencia la entrevista -> avisar a los admins
+  if (req.user.role !== 'admin') {
+    notificarAdmins({
+      entidad: 'diagnostico', entidadId: d.id,
+      titulo: 'Respuestas de diagnóstico recibidas',
+      mensaje: `Diagnóstico #${d.id}: el cliente guardó ${Object.keys(respuestas).length} respuesta(s) — ${req.user.email}`,
+      url: '/admin/diagnosticos',
+      userId: req.user.id,
+    })
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -302,6 +334,17 @@ export async function uploadDocumento(req, res) {
     .merge()
 
   res.status(201).json({ ok: true })
+
+  // Cliente sube documento requerido -> avisar a los admins
+  if (req.user.role !== 'admin') {
+    notificarAdmins({
+      entidad: 'diagnostico', entidadId: d.id,
+      titulo: 'Documento de diagnóstico cargado',
+      mensaje: `Diagnóstico #${d.id}: el cliente subió "${req.file.originalname}" (${config.nombre}) — ${req.user.email}`,
+      url: '/admin/diagnosticos',
+      userId: req.user.id,
+    })
+  }
 }
 
 // PUT /diagnosticos/documentos/:docId — revisión del staff (estado + comentarios)

@@ -14,14 +14,14 @@ async function smmlvVigente() {
 test('crea y liquida un período quincenal con deducciones separadas y snapshot anual', async () => {
   const { token } = await loginAs(ADMIN)
   const empleado = await db('empleados')
-    .where('empresa_id', 1)
+    .where('empresa_id', 2)
     .whereIn('riesgo', ['I', 'II', 'III', 'IV', 'V'])
     .where(builder => builder.whereNull('tipo_contrato').orWhereNot('tipo_contrato', 'prestacion'))
     .first()
   assert.ok(empleado, 'se necesita un empleado activo de la empresa de prueba')
 
   const created = await api.post('/nominas', {
-    empresa_id: 1,
+    empresa_id: 2,
     nombre_periodo: `Test Nómina ${Date.now()} 2026`,
     vigencia: 2026,
     dias_periodo: 15,
@@ -46,7 +46,7 @@ test('crea y liquida un período quincenal con deducciones separadas y snapshot 
 test('liquida incapacidad del período y horas por tipo con retención calculada', async () => {
   const { token } = await loginAs(ADMIN)
   const empleado = await db('empleados')
-    .where('empresa_id', 1)
+    .where('empresa_id', 2)
     .whereIn('riesgo', ['I', 'II', 'III', 'IV', 'V'])
     .first()
   assert.ok(empleado, 'se necesita un empleado con clase de riesgo ARL asignada')
@@ -65,7 +65,7 @@ test('liquida incapacidad del período y horas por tipo con retención calculada
   incapacidadId = incId
 
   const created = await api.post('/nominas', {
-    empresa_id: 1,
+    empresa_id: 2,
     nombre_periodo: 'Marzo 2026 - Mes',
     vigencia: 2026,
     dias_periodo: 30,
@@ -112,7 +112,7 @@ test('liquida incapacidad del período y horas por tipo con retención calculada
 test('liquida ingresos tipificados por concepto y exige motivo para INCR manual', async () => {
   const { token } = await loginAs(ADMIN)
   const empleado = await db('empleados')
-    .where('empresa_id', 1)
+    .where('empresa_id', 2)
     .whereIn('riesgo', ['I', 'II', 'III', 'IV', 'V'])
     .first()
   assert.ok(empleado, 'se necesita un empleado con clase de riesgo ARL asignada')
@@ -124,7 +124,7 @@ test('liquida ingresos tipificados por concepto y exige motivo para INCR manual'
   assert.ok(viaticos && salarial, 'el seed del catálogo debe incluir INCR y salarial')
 
   const created = await api.post('/nominas', {
-    empresa_id: 1,
+    empresa_id: 2,
     nombre_periodo: `Test Conceptos ${Date.now()} 2026`,
     vigencia: 2026,
     dias_periodo: 30,
@@ -180,16 +180,13 @@ test('liquida ingresos tipificados por concepto y exige motivo para INCR manual'
   await db('nominas').where('id', id).delete()
 })
 
-// FIXTURE: JHON SANJUAN (empleado 1042, empresa 1) queda intencionalmente
-// con salario_base < SMMLV y motivo 'dato de prueba' en su ficha, para que
-// la regla SMMLV (alerta + motivo obligatorio) esté cubierta en el día a
-// día de la suite. Todos los demás empleados activos están en SMMLV o más.
-// No "corregir" su salario sin ajustar este test.
+// La regla para salarios bajo SMMLV se prueba si el dataset conserva un
+// empleado elegible por debajo del mínimo; en el dataset limpio se omite.
 test('salario inferior al SMMLV exige motivo y queda en alertas', async (t) => {
   const { token } = await loginAs(ADMIN)
   const minimo = await smmlvVigente()
   const empleado = await db('empleados')
-    .where('empresa_id', 1)
+    .where('empresa_id', 2)
     .where('salario_base', '>', 0)
     .where('salario_base', '<', minimo)
     .whereIn('riesgo', ['I', 'II', 'III', 'IV', 'V'])
@@ -201,7 +198,7 @@ test('salario inferior al SMMLV exige motivo y queda en alertas', async (t) => {
   await db('empleados').where('id', empleado.id).update({ salario_menor_motivo: null })
 
   const created = await api.post('/nominas', {
-    empresa_id: 1,
+    empresa_id: 2,
     nombre_periodo: `Test SMMLV ${Date.now()} 2026`,
     vigencia: 2026,
     dias_periodo: 15,

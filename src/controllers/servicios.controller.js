@@ -6,6 +6,16 @@ import { createNotifications, publishNotifications } from '../realtime/notificat
 // status: 1=Pendiente 2=Finalizado 3=Verificado 4=En tramite 5=Cancelado
 // status_pago: 1=Pagado 2=Pendiente 3=Cancelado
 
+function rutaCategoriaServicio(nombre) {
+  const n = String(nombre || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase()
+  if (n.includes('CONTRAT')) return '/admin/servicios/contratos'
+  if (n.includes('ASESORIA')) return '/admin/servicios/asesorias'
+  if (n.includes('EXAMEN')) return '/admin/servicios/examenes'
+  if (n.includes('INCAPAC')) return '/admin/servicios/incapacidades'
+  if (n.includes('PLANILLA') || n.includes('LIQUIDACION')) return '/admin/servicios/planillas'
+  return '/admin/servicios/afiliaciones'
+}
+
 // GET /servicio-registros?empresa_id=&nombre=&status=&status_pago=&search=&page=&per_page=
 export async function listRegistros(req, res) {
   const { search, nombre, status, status_pago, desde, hasta, page = 1, per_page = 25 } = req.query
@@ -157,12 +167,17 @@ export async function updateRegistro(req, res) {
       const changes = []
       if (statusChanged) changes.push(`Servicio: ${statusLabels[data.status] || data.status}`)
       if (paymentChanged) changes.push(`Pago: ${paymentLabels[data.status_pago] || data.status_pago}`)
+      const catalogo = registro.servicio_id
+        ? await trx('servicios').where('id', registro.servicio_id).first('nombre')
+        : null
       notifications.push(...await createNotifications(trx, clientUserId ? [clientUserId] : [], {
         titulo: 'Actualización de tu servicio',
         mensaje: `${registro.nombre || 'Servicio'} — ${changes.join(' · ')}.`,
         tipo: 'servicio',
         solicitudId: registro.solicitud_id,
-        url: registro.solicitud_id ? '/admin/solicitudes' : '/admin/servicios/afiliaciones',
+        url: registro.solicitud_id
+          ? '/admin/solicitudes'
+          : rutaCategoriaServicio(catalogo?.nombre || registro.nombre),
       }))
     }
 

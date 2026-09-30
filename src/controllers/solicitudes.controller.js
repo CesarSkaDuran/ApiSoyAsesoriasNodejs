@@ -3,6 +3,7 @@ import { resolve, sep } from 'path'
 import { createReadStream, existsSync, unlinkSync } from 'fs'
 import { canAccessEmpresa } from '../middlewares/auth.js'
 import { createNotifications, publishNotifications } from '../realtime/notifications.js'
+import { notificarAdmins, notificarCambioEstado } from '../services/notificaciones.js'
 
 const STORAGE_DIR = resolve(process.env.STORAGE_DIR || 'storage/documentos')
 
@@ -139,6 +140,18 @@ export async function create(req, res) {
 
   publishNotifications(notificationRows)
   res.status(201).json({ solicitud })
+
+  // Cliente crea -> correo a los admins (la notificacion in-app ya se creo arriba)
+  if (req.user.role !== 'admin') {
+    notificarAdmins({
+      entidad: 'solicitud', entidadId: solicitud.id,
+      titulo: 'Nueva solicitud recibida',
+      mensaje: `Solicitud #${solicitud.id}: ${solicitud.descripcion || 'Servicio solicitado'} — enviada por ${req.user.email}`,
+      url: '/admin/solicitudes',
+      crearInApp: false,
+      userId: req.user.id,
+    })
+  }
 }
 
 // PUT /solicitudes/:id - admin gestiona estados; el cliente solo puede actualizar su descripción
@@ -246,6 +259,18 @@ export async function update(req, res) {
 
   publishNotifications(notifications)
   res.json({ solicitud: updated })
+
+  // Correo al cliente por cambio de estado (respeta consentimiento de terminos)
+  if (data.status) {
+    notificarCambioEstado({
+      entidad: 'solicitud', entidadId: solicitud.id,
+      titulo: `Solicitud #${solicitud.id}`,
+      estadoAnterior: solicitud.status, estadoNuevo: data.status,
+      url: '/admin/solicitudes',
+      empresaId: solicitud.empresa_id, personaId: solicitud.persona_id,
+      crearInApp: false, // la in-app ya se publico arriba
+    })
+  }
 }
 
 // PUT /solicitudes/:id/respuesta - el admin adjunta el documento/respuesta de la solicitud

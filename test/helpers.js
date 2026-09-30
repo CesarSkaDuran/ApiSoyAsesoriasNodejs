@@ -9,7 +9,7 @@ import db from '../src/db/knex.js'
 process.env.NODE_ENV = 'test'
 
 export const ADMIN = { email: 'admin@soyasesorias.com', password: '1234567' }
-export const EMPRESA = { email: 'cliente@empresa.com', password: '1234567' }
+export const EMPRESA = { email: 'soyasesorias@prueba.com', password: '1234567' }
 
 let server, baseUrl, startPromise
 

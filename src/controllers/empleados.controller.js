@@ -227,6 +227,85 @@ async function empleadoAcceso(req, res) {
   return empleado
 }
 
+const INCAPACIDAD_TIPOS = new Set([
+  'comun', 'laboral', 'maternidad', 'paternidad', 'no_remunerada', 'vacaciones', 'otra',
+])
+
+function fechaUtc(fecha) {
+  const valor = fecha instanceof Date ? fecha.toISOString().slice(0, 10) : String(fecha || '')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(valor)) return null
+  const ms = Date.parse(`${valor}T00:00:00Z`)
+  return Number.isNaN(ms) || new Date(ms).toISOString().slice(0, 10) !== valor ? null : ms
+}
+
+function diasIncluidos(inicio, fin) {
+  const desde = fechaUtc(inicio)
+  const hasta = fechaUtc(fin)
+  return desde === null || hasta === null || hasta < desde
+    ? null
+    : Math.floor((hasta - desde) / 86_400_000) + 1
+}
+
+async function datosNuevaIncapacidad(empleado, body) {
+  const tipo = INCAPACIDAD_TIPOS.has(body.tipo) ? body.tipo : 'comun'
+  if (!INCAPACIDAD_TIPOS.has(body.tipo || 'comun')) {
+    return { error: 'Tipo de incapacidad o licencia no válido' }
+  }
+  const dias = diasIncluidos(body.fecha_inicio, body.fecha_fin)
+  if (dias === null) return { error: 'Indica fechas válidas y una fecha fin igual o posterior al inicio' }
+  const requiereCertificado = ['comun', 'laboral', 'maternidad', 'paternidad'].includes(tipo)
+  if (requiereCertificado && !body.fecha_expedicion) {
+    return { error: 'La fecha de expedición del certificado es obligatoria para incapacidades y licencias médicas' }
+  }
+  if (body.fecha_expedicion && fechaUtc(body.fecha_expedicion) === null) {
+    return { error: 'La fecha de expedición del certificado no es válida' }
+  }
+
+  const origen = tipo === 'comun' || tipo === 'laboral' ? tipo : null
+  let diasAcumulado = 0
+  const prorrogaDeId = Number(body.prorroga_de_id) || null
+  if (prorrogaDeId) {
+    if (!['comun', 'laboral'].includes(tipo)) {
+      return { error: 'Solo una incapacidad común o laboral puede registrarse como prórroga' }
+    }
+    const anterior = await db('incapacidades')
+      .where({ id: prorrogaDeId, empleado_id: empleado.id }).first()
+    if (!anterior || anterior.tipo !== tipo || !anterior.fecha_fin) {
+      return { error: 'La incapacidad anterior no existe, no corresponde al mismo empleado/origen o no tiene fecha fin' }
+    }
+    const finAnterior = fechaUtc(anterior.fecha_fin)
+    const inicioActual = fechaUtc(body.fecha_inicio)
+    const interrupcion = finAnterior === null || inicioActual === null
+      ? Infinity
+      : Math.floor((inicioActual - finAnterior) / 86_400_000) - 1
+    if (interrupcion < 0 || interrupcion > 30) {
+      return { error: 'La prórroga debe iniciar después de la incapacidad anterior y con máximo 30 días calendario de interrupción' }
+    }
+    const diasAnteriores = Number(anterior.dias) || diasIncluidos(anterior.fecha_inicio, anterior.fecha_fin) || 0
+    diasAcumulado = Number(anterior.dias_acumulado || 0) + diasAnteriores
+  }
+
+  return {
+    empleado_id: empleado.id,
+    eps_id: ['comun', 'maternidad', 'paternidad'].includes(tipo)
+      ? (Number(body.eps_id) || empleado.eps_id || null)
+      : null,
+    arl_id: tipo === 'laboral' ? (Number(body.arl_id) || empleado.arl_id || null) : null,
+    fecha_inicio: body.fecha_inicio,
+    fecha_fin: body.fecha_fin,
+    fecha_expedicion: body.fecha_expedicion || null,
+    dias,
+    dias_acumulado: diasAcumulado,
+    prorroga_de_id: prorrogaDeId,
+    origen,
+    retroactiva: body.retroactiva === true || body.retroactiva === 1 || body.retroactiva === '1',
+    numero_certificado: String(body.numero_certificado || '').trim() || null,
+    tipo,
+    valor: Number(body.valor) > 0 ? Number(body.valor) : null,
+    status: 'reportada',
+  }
+}
+
 // POST /empleados/:id/beneficiarios
 export async function addBeneficiario(req, res) {
   const empleado = await empleadoAcceso(req, res)
@@ -259,19 +338,10 @@ export async function removeBeneficiario(req, res) {
 export async function addIncapacidad(req, res) {
   const empleado = await empleadoAcceso(req, res)
   if (!empleado) return
-  const { eps_id, fecha_inicio, fecha_fin, dias, tipo, valor } = req.body
-  if (!fecha_inicio) return res.status(400).json({ error: 'fecha_inicio requerida' })
+  const data = await datosNuevaIncapacidad(empleado, req.body || {})
+  if (data.error) return res.status(400).json({ error: data.error })
 
-  const [id] = await db('incapacidades').insert({
-    empleado_id: empleado.id,
-    eps_id: eps_id || empleado.eps_id,
-    fecha_inicio,
-    fecha_fin: fecha_fin || null,
-    dias: dias || null,
-    tipo: tipo || 'comun',
-    valor: valor || null,
-    status: 'reportada',
-  })
+  const [id] = await db('incapacidades').insert(data)
   res.status(201).json({ incapacidad: await db('incapacidades').where('id', id).first() })
 }
 
@@ -284,7 +354,7 @@ export async function updateIncapacidad(req, res) {
   if (!inc) return res.status(404).json({ error: 'Incapacidad no encontrada' })
 
   const data = {}
-  for (const c of ['eps_id', 'fecha_inicio', 'fecha_fin', 'dias', 'tipo', 'valor', 'status']) {
+  for (const c of ['eps_id', 'arl_id', 'fecha_expedicion', 'numero_certificado', 'retroactiva', 'valor', 'status']) {
     if (req.body[c] !== undefined) data[c] = req.body[c]
   }
   await db('incapacidades').where('id', inc.id).update(data)

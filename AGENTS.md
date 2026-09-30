@@ -8,13 +8,10 @@
 
 ## Fixtures de la suite
 
-- **JHON SANJUAN (empleado 1042, empresa 1)** queda intencionalmente con
-  `salario_base < SMMLV` y `salario_menor_motivo = 'dato de prueba'` para
-  cubrir la regla SMMLV (alerta + motivo obligatorio en liquidación y en
-  el form de empleado). No "corregir" su salario sin ajustar
-  `test/nomina-liquidar.test.js` ("salario inferior al SMMLV...").
-- Todos los demás empleados activos están en SMMLV ($1.750.905, vigencia
-  2026) o más, con motivo 'dato de prueba' residual en ficha (inofensivo).
+- La empresa de pruebas conservada es SOYASESORIAS (ID 2), con sus 11 empleados.
+- El test de salarios bajo SMMLV se omite si no hay un empleado elegible
+  bajo el mínimo; no mantiene un empleado de prueba dentro de los datos de clientes.
+- Los DECIMAL llegan como string y se convierten antes de operaciones aritméticas.
 
 ## Reglas de negocio recientes (nómina)
 

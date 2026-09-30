@@ -20,6 +20,7 @@ import auditoriasRoutes from './auditorias.routes.js'
 import maestrosRoutes from './maestros.routes.js'
 import ventasRoutes from './ventas.routes.js'
 import diagnosticosRoutes from './diagnosticos.routes.js'
+import configuracionRoutes from './configuracion.routes.js'
 
 const router = Router()
 
@@ -41,6 +42,7 @@ router.use('/informes', informesRoutes)
 router.use('/auditorias', auditoriasRoutes)
 router.use('/maestros', maestrosRoutes)
 router.use('/ventas', ventasRoutes)
+router.use('/configuracion', configuracionRoutes)
 
 // Prefijos múltiples: /servicios-catalogo, /servicio-registros,
 // /diagnosticos y /diagnostico-config

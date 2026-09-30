@@ -1,8 +1,11 @@
 import db from '../db/knex.js'
 import { canAccessEmpresa } from '../middlewares/auth.js'
+import { notificarCambioEstado } from '../services/notificaciones.js'
 
 // Cuentas de cobro (viejo cuenta_cobro). status: 1=Pagado 2=Pendiente
 // 3=En tramite 4=Activo 5=Rechazado
+const ESTADO_LABEL = { 1: 'Pagada', 2: 'Pendiente', 3: 'En trámite', 4: 'Activa', 5: 'Rechazada' }
+const labelEstado = (s) => ESTADO_LABEL[Number(s)] || `Estado ${s}`
 
 // GET /pagos?empresa_id=&status=&search=&page=&per_page=
 export async function list(req, res) {
@@ -121,4 +124,15 @@ export async function update(req, res) {
 
   await db('cuentas_cobro').where('id', cuenta.id).update(data)
   res.json({ cuenta: await db('cuentas_cobro').where('id', cuenta.id).first() })
+
+  if (data.status !== undefined && Number(data.status) !== Number(cuenta.status)) {
+    notificarCambioEstado({
+      entidad: 'pago', entidadId: cuenta.id,
+      titulo: `Cuenta de cobro ${cuenta.numero ? '#' + cuenta.numero : '#' + cuenta.id}`,
+      estadoAnterior: labelEstado(cuenta.status), estadoNuevo: labelEstado(data.status),
+      url: '/admin/pagos',
+      empresaId: cuenta.empresa_id, personaId: cuenta.persona_id,
+      detalle: `<b>Estado anterior:</b> ${labelEstado(cuenta.status)}<br><b>Estado nuevo:</b> ${labelEstado(data.status)}<br><b>Valor:</b> $${Number(cuenta.valor_total || 0).toLocaleString('es-CO')}`,
+    })
+  }
 }

@@ -17,7 +17,7 @@ test('salario integral: validación en ficha, en liquidación y factor de empres
   const { token } = await loginAs(ADMIN)
   const p = await db('nomina_parametros').orderBy('vigencia', 'desc').first()
   smmlv = Number(p.salario_minimo)
-  const empresaId = 1
+  const empresaId = 2
   const doc = () => `TEST-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
   // ── Ficha: create bajo el piso → 400; >= piso → 201 ─────────────────────

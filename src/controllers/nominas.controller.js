@@ -365,7 +365,7 @@ export async function liquidar(req, res) {
       ;(novedadesPorEmpleado[row.empleado_id] ||= []).push({
         tipo: row.tipo,
         dias: diasEnPeriodo,
-        dias_previos: Math.max(0, diffDias(fi, ini)),
+        dias_previos: Number(row.dias_acumulado || 0) + Math.max(0, diffDias(fi, ini)),
         descripcion: `${row.tipo} ${fi} → ${ff}`,
       })
     }

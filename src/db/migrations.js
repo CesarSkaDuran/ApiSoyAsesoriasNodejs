@@ -699,19 +699,51 @@ export async function runMigrations() {
       t.increments('id')
       t.integer('empleado_id').unsigned().references('id').inTable('empleados').onDelete('CASCADE').notNullable().index()
       t.integer('eps_id').unsigned().references('id').inTable('eps').onDelete('SET NULL').nullable()
+      t.integer('arl_id').unsigned().references('id').inTable('arl').onDelete('SET NULL').nullable()
       t.date('fecha_inicio').notNullable()
       t.date('fecha_fin').nullable()
+      t.date('fecha_expedicion').nullable()
       t.integer('dias').nullable()
-      t.enum('tipo', ['comun', 'laboral', 'maternidad', 'otra']).defaultTo('comun')
+      t.integer('dias_acumulado').unsigned().notNullable().defaultTo(0)
+      t.integer('prorroga_de_id').unsigned().nullable().index()
+      t.enum('origen', ['comun', 'laboral']).nullable()
+      t.boolean('retroactiva').notNullable().defaultTo(false)
+      t.string('numero_certificado', 100).nullable()
+      t.enum('tipo', ['comun', 'laboral', 'maternidad', 'paternidad', 'no_remunerada', 'vacaciones', 'otra']).defaultTo('comun')
       t.decimal('valor', 15, 2).nullable()
       t.enum('status', ['reportada', 'en_tramite', 'pagada']).defaultTo('reportada')
       t.timestamps(true, true)
     })
     console.log('  + incapacidades')
   }
+  if (!await db.schema.hasColumn('incapacidades', 'arl_id')) {
+    await db.schema.alterTable('incapacidades', t => {
+      t.integer('arl_id').unsigned().nullable().references('id').inTable('arl').onDelete('SET NULL')
+    })
+  }
+  if (!await db.schema.hasColumn('incapacidades', 'fecha_expedicion')) {
+    await db.schema.alterTable('incapacidades', t => { t.date('fecha_expedicion').nullable() })
+  }
+  if (!await db.schema.hasColumn('incapacidades', 'dias_acumulado')) {
+    await db.schema.alterTable('incapacidades', t => { t.integer('dias_acumulado').unsigned().notNullable().defaultTo(0) })
+  }
+  if (!await db.schema.hasColumn('incapacidades', 'prorroga_de_id')) {
+    await db.schema.alterTable('incapacidades', t => { t.integer('prorroga_de_id').unsigned().nullable().index() })
+  }
+  if (!await db.schema.hasColumn('incapacidades', 'origen')) {
+    await db.schema.alterTable('incapacidades', t => { t.enum('origen', ['comun', 'laboral']).nullable() })
+  }
+  if (!await db.schema.hasColumn('incapacidades', 'retroactiva')) {
+    await db.schema.alterTable('incapacidades', t => { t.boolean('retroactiva').notNullable().defaultTo(false) })
+  }
+  if (!await db.schema.hasColumn('incapacidades', 'numero_certificado')) {
+    await db.schema.alterTable('incapacidades', t => { t.string('numero_certificado', 100).nullable() })
+  }
+  await db('incapacidades').whereNull('origen').whereIn('tipo', ['comun', 'laboral'])
+    .update({ origen: db.raw('tipo') })
   const [incTipo] = await db.raw(`SHOW COLUMNS FROM incapacidades LIKE 'tipo'`)
-  if (incTipo?.[0] && !String(incTipo[0].Type).includes('paternidad')) {
-    await db.raw(`ALTER TABLE incapacidades MODIFY COLUMN tipo ENUM('comun','laboral','maternidad','paternidad','no_remunerada','otra') NULL DEFAULT 'comun'`)
+  if (incTipo?.[0] && ['paternidad', 'no_remunerada', 'vacaciones', 'otra'].some(tipo => !String(incTipo[0].Type).includes(tipo))) {
+    await db.raw(`ALTER TABLE incapacidades MODIFY COLUMN tipo ENUM('comun','laboral','maternidad','paternidad','no_remunerada','vacaciones','otra') NULL DEFAULT 'comun'`)
     console.log('  ~ incapacidades.tipo')
   }
 
@@ -1540,6 +1572,84 @@ export async function runMigrations() {
     const jhon = await bajoPrueba.clone().where('id', 1042)
       .update({ salario_menor_motivo: 'dato de prueba' })
     if (subidos || jhon) console.log(`  ~ fixture SMMLV (subidos ${subidos}, jhon ${jhon})`)
+  }
+
+  // ── Consentimiento legal y notificaciones ───────────────────────────
+  // Flag rapido en users (la trazabilidad completa queda en consentimientos)
+  if (!await db.schema.hasColumn('users', 'terminos_aceptados_en')) {
+    await db.schema.alterTable('users', t => {
+      t.dateTime('terminos_aceptados_en').nullable()
+      t.string('terminos_version', 20).nullable()
+    })
+    console.log('  ~ users.terminos_*')
+  }
+
+  // Registro append-only de aceptaciones (prueba legal: fecha, ip, version)
+  if (!await db.schema.hasTable('consentimientos')) {
+    await db.schema.createTable('consentimientos', t => {
+      t.increments('id')
+      t.integer('user_id').unsigned().references('id').inTable('users').onDelete('CASCADE').notNullable().index()
+      t.string('tipo', 40).notNullable().defaultTo('terminos')
+      t.string('version', 20).notNullable()
+      t.boolean('aceptado').notNullable().defaultTo(true)
+      t.dateTime('aceptado_en').notNullable()
+      t.string('ip', 45).nullable()
+      t.string('user_agent', 255).nullable()
+      t.timestamps(true, true)
+    })
+    console.log('  + consentimientos')
+  }
+
+  // Auditoria de correos enviados (o intentos omitidos por falta de
+  // consentimiento / SMTP no configurado)
+  if (!await db.schema.hasTable('email_log')) {
+    await db.schema.createTable('email_log', t => {
+      t.increments('id')
+      t.integer('user_id').unsigned().nullable().index()
+      t.string('destinatario', 200).nullable()
+      t.string('entidad', 40).nullable()
+      t.integer('entidad_id').nullable()
+      t.string('asunto', 255).nullable()
+      t.enum('status', ['enviado', 'error', 'omitido']).notNullable().defaultTo('enviado')
+      t.text('detalle').nullable()
+      t.timestamps(true, true)
+    })
+    console.log('  + email_log')
+  }
+
+  // Configuracion SMTP editable desde el modulo de Configuracion.
+  // Fila unica; si existe, el mailer la prefiere sobre las variables
+  // de entorno (que quedan como respaldo/fallback).
+  if (!await db.schema.hasTable('smtp_config')) {
+    await db.schema.createTable('smtp_config', t => {
+      t.increments('id')
+      t.string('host', 200).notNullable()
+      t.integer('port').notNullable().defaultTo(465)
+      t.boolean('secure').notNullable().defaultTo(true)
+      t.string('username', 200).notNullable()
+      t.string('password', 255).nullable()
+      t.string('remitente', 255).nullable()
+      t.integer('updated_by').unsigned().nullable()
+      t.timestamps(true, true)
+    })
+    await db('smtp_config').insert({
+      host: process.env.SMTP_HOST || '',
+      port: Number(process.env.SMTP_PORT) || 465,
+      secure: process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : true,
+      username: process.env.SMTP_USER || '',
+      password: process.env.SMTP_PASS || null,
+      remitente: process.env.SMTP_FROM || null,
+    })
+    console.log('  + smtp_config')
+  }
+  // Correos del equipo que reciben las notificaciones de acciones del
+  // cliente (puede ser una lista distinta a los emails de los usuarios
+  // admin, que suelen ser cuentas de solo-sistema).
+  if (!await db.schema.hasColumn('smtp_config', 'correos_admin')) {
+    await db.schema.alterTable('smtp_config', t => {
+      t.text('correos_admin').nullable()
+    })
+    console.log('  ~ smtp_config.correos_admin')
   }
 
   console.log('Migraciones completadas.')

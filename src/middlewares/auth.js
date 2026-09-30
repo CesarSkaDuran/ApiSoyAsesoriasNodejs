@@ -17,7 +17,7 @@ export async function authMiddleware(req, res, next) {
     const payload = jwt.verify(token, process.env.JWT_SECRET)
 
     const user = await db('users')
-      .select('id', 'name', 'lastname', 'email', 'role', 'is_active')
+      .select('id', 'name', 'lastname', 'email', 'role', 'is_active', 'terminos_aceptados_en', 'terminos_version')
       .where('id', payload.id)
       .first()
 

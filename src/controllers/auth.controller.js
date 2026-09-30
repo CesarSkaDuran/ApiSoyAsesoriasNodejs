@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
 import db from '../db/knex.js'
+import { TERMINOS_VERSION, TERMINOS_TEXTO } from '../config/terminos.js'
 
 // Access token: corto (renovado por /auth/refresh).
 // Refresh token: opaco, aleatorio, guardado como SHA-256 en refresh_tokens,
@@ -40,7 +41,10 @@ async function buildUserPayload(user) {
   }
   const modulos = await db('user_modulos').where('user_id', user.id).first() || {}
   const { password: _, ...userSafe } = user
-  return { ...userSafe, empresa, persona, modulos }
+  // Consentimiento vigente (aceptacion exacta de la version actual)
+  const terminos_aceptados = !!user.terminos_aceptados_en
+    && user.terminos_version === TERMINOS_VERSION
+  return { ...userSafe, empresa, persona, modulos, terminos_aceptados, terminos_version_actual: TERMINOS_VERSION }
 }
 
 export async function login(req, res) {
@@ -51,7 +55,7 @@ export async function login(req, res) {
   }
 
   const user = await db('users')
-    .select('id', 'name', 'lastname', 'email', 'password', 'role', 'is_active')
+    .select('id', 'name', 'lastname', 'email', 'password', 'role', 'is_active', 'terminos_aceptados_en', 'terminos_version')
     .where('email', email)
     .first()
 
@@ -94,7 +98,7 @@ export async function refresh(req, res) {
   }
 
   const user = await db('users')
-    .select('id', 'name', 'lastname', 'email', 'password', 'role', 'is_active')
+    .select('id', 'name', 'lastname', 'email', 'password', 'role', 'is_active', 'terminos_aceptados_en', 'terminos_version')
     .where('id', row.user_id)
     .first()
 
@@ -114,7 +118,45 @@ export async function refresh(req, res) {
 }
 
 export async function me(req, res) {
-  res.json({ user: req.user })
+  const u = req.user
+  const terminos_aceptados = !!u.terminos_aceptados_en && u.terminos_version === TERMINOS_VERSION
+  res.json({ user: { ...u, terminos_aceptados, terminos_version_actual: TERMINOS_VERSION } })
+}
+
+// GET /auth/terminos — texto vigente (publico, tambien sirve pre-login)
+export async function terminos(req, res) {
+  res.json({ version: TERMINOS_VERSION, texto: TERMINOS_TEXTO })
+}
+
+// POST /auth/aceptar-terminos — registra consentimiento (prueba legal)
+export async function aceptarTerminos(req, res) {
+  const { version } = req.body || {}
+  if (version !== TERMINOS_VERSION) {
+    return res.status(400).json({ error: 'Debes aceptar la versión vigente de los términos' })
+  }
+  const ya = await db('users').where('id', req.user.id)
+    .first('terminos_aceptados_en', 'terminos_version')
+  if (ya?.terminos_aceptados_en && ya.terminos_version === TERMINOS_VERSION) {
+    return res.json({ ok: true, terminos_aceptados: true })
+  }
+
+  await db.transaction(async trx => {
+    await trx('consentimientos').insert({
+      user_id: req.user.id,
+      tipo: 'terminos',
+      version: TERMINOS_VERSION,
+      aceptado: true,
+      aceptado_en: trx.fn.now(),
+      ip: req.ip || null,
+      user_agent: String(req.headers['user-agent'] || '').slice(0, 255),
+    })
+    await trx('users').where('id', req.user.id).update({
+      terminos_aceptados_en: trx.fn.now(),
+      terminos_version: TERMINOS_VERSION,
+    })
+  })
+
+  res.json({ ok: true, terminos_aceptados: true })
 }
 
 export async function logout(req, res) {
@@ -138,7 +180,7 @@ export async function changePassword(req, res) {
   }
 
   const user = await db('users')
-    .select('id', 'name', 'lastname', 'email', 'password', 'role', 'is_active')
+    .select('id', 'name', 'lastname', 'email', 'password', 'role', 'is_active', 'terminos_aceptados_en', 'terminos_version')
     .where('id', req.user.id)
     .first()
   if (!user || !user.is_active) return res.status(403).json({ error: 'Usuario no disponible' })

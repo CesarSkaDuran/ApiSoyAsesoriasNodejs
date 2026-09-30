@@ -3,6 +3,7 @@ import { resolve, sep } from 'path'
 import { createReadStream, existsSync, unlinkSync } from 'fs'
 import { canAccessEmpresa } from '../middlewares/auth.js'
 import { createNotifications, publishNotifications } from '../realtime/notifications.js'
+import { notificarAdmins } from '../services/notificaciones.js'
 
 const STORAGE_DIR = resolve(process.env.STORAGE_DIR || 'storage/documentos')
 
@@ -119,6 +120,18 @@ export async function uploadDoc(req, res) {
 
   publishNotifications(notificationRows)
   res.status(201).json({ documento })
+
+  // Cliente carga documento -> correo a los admins (in-app ya creada arriba)
+  if (req.user.role !== 'admin') {
+    notificarAdmins({
+      entidad: 'documento', entidadId: documento.id,
+      titulo: 'Documento cargado por un cliente',
+      mensaje: `Documento #${documento.id}: ${documento.nombre} — ${req.user.email}`,
+      url: '/admin/documentos',
+      crearInApp: false,
+      userId: req.user.id,
+    })
+  }
 }
 
 // PUT /documentos/:id - metadata del documento; el estatus solo lo cambia el admin
