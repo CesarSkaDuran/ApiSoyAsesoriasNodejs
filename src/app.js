@@ -7,6 +7,8 @@ import { pino } from 'pino'
 import routes from './routes/index.js'
 import { auditMutation } from './middlewares/audit.js'
 import { normalizeDates } from './middlewares/normalizeDates.js'
+import swaggerUi from 'swagger-ui-express'
+import openapi from './docs/openapi.js'
 
 // App Express sin side-effects (ni listen ni migraciones) para tests de integración.
 const logger = pino()
@@ -26,6 +28,11 @@ app.use(normalizeDates)
 app.use(auditMutation)
 
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'soyasesorias-api' }))
+
+if (process.env.SWAGGER_ENABLED !== 'false') {
+  app.get('/swagger.json', (req, res) => res.json(openapi))
+  app.use('/swagger', swaggerUi.serve, swaggerUi.setup(openapi, { customSiteTitle: 'API SoyAsesorías' }))
+}
 
 app.use('/api', routes)
 

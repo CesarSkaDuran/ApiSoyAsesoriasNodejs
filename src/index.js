@@ -9,14 +9,18 @@ import { attachSocketServer } from './realtime/socket.js'
 const logger = pino()
 const PORT = process.env.PORT || 3000
 
-try {
-  await runMigrations()
-} catch (err) {
-  logger.error({ err }, 'Error ejecutando migraciones')
+async function start() {
+  try {
+    await runMigrations()
+  } catch (err) {
+    logger.error({ err }, 'Error ejecutando migraciones')
+  }
+
+  const server = createServer(app)
+  attachSocketServer(server)
+  server.listen(PORT, () => {
+    logger.info(`API SoyAsesorias en http://localhost:${PORT}`)
+  })
 }
 
-const server = createServer(app)
-attachSocketServer(server)
-server.listen(PORT, () => {
-  logger.info(`API SoyAsesorias en http://localhost:${PORT}`)
-})
+void start()

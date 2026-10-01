@@ -32,3 +32,14 @@
 - Los DECIMAL llegan como string desde MySQL: coerción `Number()`
   explícita en cualquier suma de parámetros (bug histórico de NaN en el
   estimado del frontend).
+
+## Swagger / OpenAPI
+
+- Interfaz: `/api-docs`; especificación JSON: `/api-docs.json`.
+- La definición está en `src/docs/openapi.js`; al agregar o cambiar rutas,
+  actualizar también su inventario OpenAPI.
+- Endpoints protegidos documentan Bearer JWT; captación de leads usa
+  `x-marketing-token`.
+- `SWAGGER_ENABLED=false` desactiva la documentación.
+- Mantener `src/index.js` sin top-level await: el cargador Passenger/LiteSpeed
+  requiere la entrada y no soporta módulos ESM con top-level await.

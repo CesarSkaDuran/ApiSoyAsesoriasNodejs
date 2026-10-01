@@ -5,6 +5,14 @@ import { NOMINA_PARAMETER_DEFAULTS, NOMINA_JSON_FIELDS } from '../nomina-paramet
 // InnoDB + FKs reales + indices. Montos DECIMAL, fechas DATE/DATETIME.
 // El tenant real es empresa_id (se acaba la indireccion por afiliacion_id).
 
+// InnoDB explicito: en servidores donde el engine por defecto no es InnoDB
+// (p.ej. hosting compartido con MyISAM), los FK fallan con errno 150.
+const createTable = (name, cb) =>
+  db.schema.createTable(name, (t) => {
+    t.engine('InnoDB')
+    cb(t)
+  })
+
 export async function runMigrations() {
   console.log('Ejecutando migraciones...')
 
@@ -13,7 +21,7 @@ export async function runMigrations() {
   // ══════════════════════════════════════════════════════════════════
 
   if (!await db.schema.hasTable('departamentos')) {
-    await db.schema.createTable('departamentos', t => {
+    await createTable('departamentos', t => {
       t.increments('id')
       t.string('nombre', 100).notNullable()
       t.timestamps(true, true)
@@ -22,7 +30,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('ciudades')) {
-    await db.schema.createTable('ciudades', t => {
+    await createTable('ciudades', t => {
       t.increments('id')
       t.integer('departamento_id').unsigned().references('id').inTable('departamentos').index()
       t.string('nombre', 150).notNullable()
@@ -32,7 +40,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('actividades_economicas')) {
-    await db.schema.createTable('actividades_economicas', t => {
+    await createTable('actividades_economicas', t => {
       t.increments('id')
       t.string('codigo', 20).nullable()
       t.string('nombre', 255).notNullable()
@@ -42,7 +50,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('eps')) {
-    await db.schema.createTable('eps', t => {
+    await createTable('eps', t => {
       t.increments('id')
       t.string('nombre', 150).notNullable()
       t.boolean('activo').defaultTo(true)
@@ -52,7 +60,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('arl')) {
-    await db.schema.createTable('arl', t => {
+    await createTable('arl', t => {
       t.increments('id')
       t.string('nombre', 150).notNullable()
       t.boolean('activo').defaultTo(true)
@@ -62,7 +70,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('pensiones')) {
-    await db.schema.createTable('pensiones', t => {
+    await createTable('pensiones', t => {
       t.increments('id')
       t.string('nombre', 150).notNullable()
       t.boolean('activo').defaultTo(true)
@@ -72,7 +80,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('cajas_compensacion')) {
-    await db.schema.createTable('cajas_compensacion', t => {
+    await createTable('cajas_compensacion', t => {
       t.increments('id')
       t.string('nombre', 150).notNullable()
       t.boolean('activo').defaultTo(true)
@@ -82,7 +90,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('bancos')) {
-    await db.schema.createTable('bancos', t => {
+    await createTable('bancos', t => {
       t.increments('id')
       t.string('nombre', 150).notNullable()
       t.boolean('activo').defaultTo(true)
@@ -92,7 +100,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('cargos')) {
-    await db.schema.createTable('cargos', t => {
+    await createTable('cargos', t => {
       t.increments('id')
       t.string('nombre', 150).notNullable()
       t.timestamps(true, true)
@@ -102,7 +110,7 @@ export async function runMigrations() {
 
   // Catalogo de servicios que vende SoyAsesorias (afiliaciones, planillas, planes...)
   if (!await db.schema.hasTable('servicios')) {
-    await db.schema.createTable('servicios', t => {
+    await createTable('servicios', t => {
       t.increments('id')
       t.string('nombre', 200).notNullable()
       t.text('descripcion').nullable()
@@ -119,7 +127,7 @@ export async function runMigrations() {
   // ══════════════════════════════════════════════════════════════════
 
   if (!await db.schema.hasTable('users')) {
-    await db.schema.createTable('users', t => {
+    await createTable('users', t => {
       t.increments('id')
       t.string('name', 150).notNullable()
       t.string('lastname', 150).nullable()
@@ -135,7 +143,7 @@ export async function runMigrations() {
 
   // Permisos por modulo (reemplaza tabla modulos: 1=si, 0/2=no segun regla de negocio)
   if (!await db.schema.hasTable('user_modulos')) {
-    await db.schema.createTable('user_modulos', t => {
+    await createTable('user_modulos', t => {
       t.increments('id')
       t.integer('user_id').unsigned().references('id').inTable('users').onDelete('CASCADE').notNullable().index()
       t.boolean('home').defaultTo(true)
@@ -162,7 +170,7 @@ export async function runMigrations() {
   // ══════════════════════════════════════════════════════════════════
 
   if (!await db.schema.hasTable('empresas')) {
-    await db.schema.createTable('empresas', t => {
+    await createTable('empresas', t => {
       t.increments('id')
       t.integer('user_id').unsigned().references('id').inTable('users').onDelete('SET NULL').nullable().index()
       t.integer('actividad_economica_id').unsigned().references('id').inTable('actividades_economicas').nullable()
@@ -212,7 +220,7 @@ export async function runMigrations() {
 
   // Trabajadores independientes (persona natural cliente)
   if (!await db.schema.hasTable('personas')) {
-    await db.schema.createTable('personas', t => {
+    await createTable('personas', t => {
       t.increments('id')
       t.integer('user_id').unsigned().references('id').inTable('users').onDelete('SET NULL').nullable().index()
       t.integer('departamento_id').unsigned().references('id').inTable('departamentos').nullable()
@@ -238,7 +246,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('sucursales')) {
-    await db.schema.createTable('sucursales', t => {
+    await createTable('sucursales', t => {
       t.increments('id')
       t.integer('empresa_id').unsigned().references('id').inTable('empresas').onDelete('CASCADE').notNullable().index()
       t.string('nombre', 150).notNullable()
@@ -251,7 +259,7 @@ export async function runMigrations() {
 
   // Servicios contratados por cada empresa (reemplaza las ~14 columnas varchar de flags)
   if (!await db.schema.hasTable('empresa_servicios')) {
-    await db.schema.createTable('empresa_servicios', t => {
+    await createTable('empresa_servicios', t => {
       t.increments('id')
       t.integer('empresa_id').unsigned().references('id').inTable('empresas').onDelete('CASCADE').notNullable()
       t.integer('servicio_id').unsigned().references('id').inTable('servicios').notNullable()
@@ -268,7 +276,7 @@ export async function runMigrations() {
 
   // Solicitud/registro de afiliacion (historico, ya no es la llave del tenant)
   if (!await db.schema.hasTable('afiliaciones')) {
-    await db.schema.createTable('afiliaciones', t => {
+    await createTable('afiliaciones', t => {
       t.increments('id')
       t.integer('empresa_id').unsigned().references('id').inTable('empresas').nullable().index()
       t.integer('persona_id').unsigned().references('id').inTable('personas').nullable().index()
@@ -289,7 +297,7 @@ export async function runMigrations() {
   // ══════════════════════════════════════════════════════════════════
 
   if (!await db.schema.hasTable('empleados')) {
-    await db.schema.createTable('empleados', t => {
+    await createTable('empleados', t => {
       t.increments('id')
       t.integer('empresa_id').unsigned().references('id').inTable('empresas').onDelete('CASCADE').notNullable().index()
       t.integer('sucursal_id').unsigned().references('id').inTable('sucursales').onDelete('SET NULL').nullable()
@@ -327,7 +335,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('beneficiados')) {
-    await db.schema.createTable('beneficiados', t => {
+    await createTable('beneficiados', t => {
       t.increments('id')
       t.integer('empleado_id').unsigned().references('id').inTable('empleados').onDelete('CASCADE').notNullable().index()
       t.string('nombre', 200).notNullable()
@@ -340,7 +348,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('periodos')) {
-    await db.schema.createTable('periodos', t => {
+    await createTable('periodos', t => {
       t.increments('id')
       t.string('nombre', 100).notNullable()
       t.date('fecha_inicio').notNullable()
@@ -351,7 +359,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('nominas')) {
-    await db.schema.createTable('nominas', t => {
+    await createTable('nominas', t => {
       t.increments('id')
       t.integer('empresa_id').unsigned().references('id').inTable('empresas').notNullable().index()
       t.integer('periodo_id').unsigned().references('id').inTable('periodos').nullable()
@@ -396,7 +404,7 @@ export async function runMigrations() {
 
   // Detalle por empleado: devengados + aportes seguridad social (PILA) + prestaciones
   if (!await db.schema.hasTable('nomina_detalles')) {
-    await db.schema.createTable('nomina_detalles', t => {
+    await createTable('nomina_detalles', t => {
       t.increments('id')
       t.integer('nomina_id').unsigned().references('id').inTable('nominas').onDelete('CASCADE').notNullable().index()
       t.integer('empleado_id').unsigned().references('id').inTable('empleados').notNullable()
@@ -477,7 +485,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('nomina_parametros')) {
-    await db.schema.createTable('nomina_parametros', t => {
+    await createTable('nomina_parametros', t => {
       t.integer('vigencia').unsigned().primary()
       t.decimal('salario_minimo', 15, 2).notNullable()
       t.decimal('auxilio_transporte', 15, 2).notNullable()
@@ -576,7 +584,7 @@ export async function runMigrations() {
     .update({ fuente_normativa: NOMINA_PARAMETER_DEFAULTS[2026].fuente_normativa })
 
   if (!await db.schema.hasTable('horas_extras')) {
-    await db.schema.createTable('horas_extras', t => {
+    await createTable('horas_extras', t => {
       t.increments('id')
       t.integer('empleado_id').unsigned().references('id').inTable('empleados').onDelete('CASCADE').notNullable().index()
       t.integer('nomina_id').unsigned().references('id').inTable('nominas').onDelete('SET NULL').nullable()
@@ -595,7 +603,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('otros_ingresos')) {
-    await db.schema.createTable('otros_ingresos', t => {
+    await createTable('otros_ingresos', t => {
       t.increments('id')
       t.integer('empleado_id').unsigned().references('id').inTable('empleados').onDelete('CASCADE').notNullable().index()
       t.integer('nomina_id').unsigned().references('id').inTable('nominas').onDelete('SET NULL').nullable()
@@ -618,7 +626,7 @@ export async function runMigrations() {
   // retención (gravable vs INCR). limite_incr_uvt/condicion_salario_uvt permiten
   // INCR parcial con tope (ej. alimentación: ET art. 387-1).
   if (!await db.schema.hasTable('conceptos_nomina')) {
-    await db.schema.createTable('conceptos_nomina', t => {
+    await createTable('conceptos_nomina', t => {
       t.increments('id')
       t.string('nombre', 120).notNullable()
       t.boolean('constitutivo_salario').notNullable().defaultTo(true)
@@ -672,7 +680,7 @@ export async function runMigrations() {
   console.log('  ~ conceptos_nomina seed sincronizado')
 
   if (!await db.schema.hasTable('deducciones')) {
-    await db.schema.createTable('deducciones', t => {
+    await createTable('deducciones', t => {
       t.increments('id')
       t.integer('empleado_id').unsigned().references('id').inTable('empleados').onDelete('CASCADE').notNullable().index()
       t.integer('nomina_id').unsigned().references('id').inTable('nominas').onDelete('SET NULL').nullable()
@@ -695,7 +703,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('incapacidades')) {
-    await db.schema.createTable('incapacidades', t => {
+    await createTable('incapacidades', t => {
       t.increments('id')
       t.integer('empleado_id').unsigned().references('id').inTable('empleados').onDelete('CASCADE').notNullable().index()
       t.integer('eps_id').unsigned().references('id').inTable('eps').onDelete('SET NULL').nullable()
@@ -749,7 +757,7 @@ export async function runMigrations() {
 
   // Planillas PILA de seguridad social
   if (!await db.schema.hasTable('planillas')) {
-    await db.schema.createTable('planillas', t => {
+    await createTable('planillas', t => {
       t.increments('id')
       t.integer('empresa_id').unsigned().references('id').inTable('empresas').notNullable().index()
       t.integer('nomina_id').unsigned().references('id').inTable('nominas').onDelete('SET NULL').nullable()
@@ -768,7 +776,7 @@ export async function runMigrations() {
   // ══════════════════════════════════════════════════════════════════
 
   if (!await db.schema.hasTable('cuentas_cobro')) {
-    await db.schema.createTable('cuentas_cobro', t => {
+    await createTable('cuentas_cobro', t => {
       t.increments('id')
       t.integer('empresa_id').unsigned().references('id').inTable('empresas').nullable().index()
       t.integer('persona_id').unsigned().references('id').inTable('personas').nullable().index()
@@ -782,7 +790,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('detalle_cobro')) {
-    await db.schema.createTable('detalle_cobro', t => {
+    await createTable('detalle_cobro', t => {
       t.increments('id')
       t.integer('cuenta_cobro_id').unsigned().references('id').inTable('cuentas_cobro').onDelete('CASCADE').notNullable().index()
       t.integer('servicio_id').unsigned().references('id').inTable('servicios').nullable()
@@ -799,7 +807,7 @@ export async function runMigrations() {
   // status: 1=Pendiente 2=Finalizado 3=Verificado 4=En tramite 5=Cancelado
   // status_pago: 1=Pagado 2=Pendiente 3=Cancelado
   if (!await db.schema.hasTable('servicio_registros')) {
-    await db.schema.createTable('servicio_registros', t => {
+    await createTable('servicio_registros', t => {
       t.increments('id')
       t.integer('empresa_id').unsigned().references('id').inTable('empresas').onDelete('CASCADE').nullable().index()
       t.integer('persona_id').unsigned().references('id').inTable('personas').onDelete('CASCADE').nullable().index()
@@ -824,7 +832,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('lista_gastos')) {
-    await db.schema.createTable('lista_gastos', t => {
+    await createTable('lista_gastos', t => {
       t.increments('id')
       t.integer('empresa_id').unsigned().references('id').inTable('empresas').onDelete('CASCADE').nullable()
       t.string('nombre', 150).notNullable()
@@ -841,7 +849,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('gastos')) {
-    await db.schema.createTable('gastos', t => {
+    await createTable('gastos', t => {
       t.increments('id')
       t.integer('lista_gasto_id').unsigned().references('id').inTable('lista_gastos').nullable()
       t.integer('empresa_id').unsigned().references('id').inTable('empresas').nullable().index()
@@ -858,7 +866,7 @@ export async function runMigrations() {
   // ══════════════════════════════════════════════════════════════════
 
   if (!await db.schema.hasTable('documentos')) {
-    await db.schema.createTable('documentos', t => {
+    await createTable('documentos', t => {
       t.increments('id')
       // Owner polimorfico por FKs: exactamente una debe estar llena
       t.integer('empresa_id').unsigned().references('id').inTable('empresas').onDelete('CASCADE').nullable().index()
@@ -884,7 +892,7 @@ export async function runMigrations() {
   // ══════════════════════════════════════════════════════════════════
 
   if (!await db.schema.hasTable('solicitudes')) {
-    await db.schema.createTable('solicitudes', t => {
+    await createTable('solicitudes', t => {
       t.increments('id')
       t.integer('empresa_id').unsigned().references('id').inTable('empresas').nullable().index()
       t.integer('persona_id').unsigned().references('id').inTable('personas').nullable().index()
@@ -903,7 +911,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('soportes')) {
-    await db.schema.createTable('soportes', t => {
+    await createTable('soportes', t => {
       t.increments('id')
       t.integer('user_id').unsigned().references('id').inTable('users').onDelete('SET NULL').nullable().index()
       t.string('asunto', 200).notNullable()
@@ -915,7 +923,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('notificaciones')) {
-    await db.schema.createTable('notificaciones', t => {
+    await createTable('notificaciones', t => {
       t.increments('id')
       t.integer('user_id').unsigned().references('id').inTable('users').onDelete('CASCADE').nullable().index()
       t.integer('empresa_id').unsigned().references('id').inTable('empresas').onDelete('CASCADE').nullable().index()
@@ -943,7 +951,7 @@ export async function runMigrations() {
     })
   }
   if (!await db.schema.hasTable('auditorias')) {
-    await db.schema.createTable('auditorias', t => {
+    await createTable('auditorias', t => {
       t.increments('id')
       t.integer('user_id').unsigned().references('id').inTable('users').onDelete('SET NULL').nullable().index()
       t.string('actor_email', 180).nullable()
@@ -967,7 +975,7 @@ export async function runMigrations() {
 
   // Catalogo configurable de tipos de documento (admin lo gestiona en Configuración)
   if (!await db.schema.hasTable('documento_tipos')) {
-    await db.schema.createTable('documento_tipos', t => {
+    await createTable('documento_tipos', t => {
       t.increments('id')
       t.string('nombre', 150).notNullable()
       t.string('descripcion', 500).nullable()
@@ -1036,7 +1044,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('observaciones')) {
-    await db.schema.createTable('observaciones', t => {
+    await createTable('observaciones', t => {
       t.increments('id')
       t.integer('empresa_id').unsigned().references('id').inTable('empresas').onDelete('CASCADE').nullable().index()
       t.integer('empleado_id').unsigned().references('id').inTable('empleados').onDelete('CASCADE').nullable()
@@ -1049,7 +1057,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('terceros')) {
-    await db.schema.createTable('terceros', t => {
+    await createTable('terceros', t => {
       t.increments('id')
       t.integer('empresa_id').unsigned().references('id').inTable('empresas').onDelete('CASCADE').nullable().index()
       t.string('nombre', 200).notNullable()
@@ -1171,7 +1179,7 @@ export async function runMigrations() {
   // ══════════════════════════════════════════════════════════════════
 
   if (!await db.schema.hasTable('embudos')) {
-    await db.schema.createTable('embudos', t => {
+    await createTable('embudos', t => {
       t.increments('id')
       t.string('slug', 60).notNullable().unique()
       t.string('nombre', 120).notNullable()
@@ -1184,7 +1192,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('embudo_etapas')) {
-    await db.schema.createTable('embudo_etapas', t => {
+    await createTable('embudo_etapas', t => {
       t.increments('id')
       t.integer('embudo_id').unsigned().references('id').inTable('embudos').onDelete('CASCADE').notNullable().index()
       t.string('slug', 60).notNullable()
@@ -1199,7 +1207,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('leads')) {
-    await db.schema.createTable('leads', t => {
+    await createTable('leads', t => {
       t.increments('id')
       t.integer('embudo_id').unsigned().references('id').inTable('embudos').onDelete('CASCADE').notNullable().index()
       t.integer('etapa_id').unsigned().references('id').inTable('embudo_etapas').index()
@@ -1229,7 +1237,7 @@ export async function runMigrations() {
   // Configuracion > Fuentes de leads / Campañas; el lead guarda el nombre)
   for (const tabla of ['lead_fuentes', 'lead_campanas']) {
     if (!await db.schema.hasTable(tabla)) {
-      await db.schema.createTable(tabla, t => {
+      await createTable(tabla, t => {
         t.increments('id')
         t.string('nombre', 120).notNullable()
         t.boolean('activo').notNullable().defaultTo(true)
@@ -1240,7 +1248,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('lead_historial')) {
-    await db.schema.createTable('lead_historial', t => {
+    await createTable('lead_historial', t => {
       t.increments('id')
       t.integer('lead_id').unsigned().references('id').inTable('leads').onDelete('CASCADE').notNullable().index()
       t.integer('embudo_id').unsigned().nullable()
@@ -1291,7 +1299,7 @@ export async function runMigrations() {
   // ══════════════════════════════════════════════════════════════════
 
   if (!await db.schema.hasTable('diagnosticos')) {
-    await db.schema.createTable('diagnosticos', t => {
+    await createTable('diagnosticos', t => {
       t.increments('id')
       t.string('nombre', 200).notNullable()
       t.integer('empresa_id').unsigned().references('id').inTable('empresas').onDelete('CASCADE').nullable().index()
@@ -1306,7 +1314,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('diagnostico_preguntas')) {
-    await db.schema.createTable('diagnostico_preguntas', t => {
+    await createTable('diagnostico_preguntas', t => {
       t.increments('id')
       t.string('slug', 100).notNullable()
       t.string('titulo', 255).notNullable()
@@ -1323,7 +1331,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('diagnostico_respuestas')) {
-    await db.schema.createTable('diagnostico_respuestas', t => {
+    await createTable('diagnostico_respuestas', t => {
       t.increments('id')
       t.integer('diagnostico_id').unsigned().references('id').inTable('diagnosticos').onDelete('CASCADE').notNullable().index()
       t.integer('pregunta_id').unsigned().references('id').inTable('diagnostico_preguntas').onDelete('CASCADE').notNullable()
@@ -1336,7 +1344,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('diagnostico_doc_config')) {
-    await db.schema.createTable('diagnostico_doc_config', t => {
+    await createTable('diagnostico_doc_config', t => {
       t.increments('id')
       t.string('slug', 100).notNullable()
       t.string('titulo', 255).notNullable()
@@ -1352,7 +1360,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('diagnostico_documentos')) {
-    await db.schema.createTable('diagnostico_documentos', t => {
+    await createTable('diagnostico_documentos', t => {
       t.increments('id')
       t.integer('diagnostico_id').unsigned().references('id').inTable('diagnosticos').onDelete('CASCADE').notNullable().index()
       t.integer('doc_config_id').unsigned().references('id').inTable('diagnostico_doc_config').onDelete('CASCADE').notNullable()
@@ -1371,7 +1379,7 @@ export async function runMigrations() {
   }
 
   if (!await db.schema.hasTable('diagnostico_informes')) {
-    await db.schema.createTable('diagnostico_informes', t => {
+    await createTable('diagnostico_informes', t => {
       t.increments('id')
       t.integer('diagnostico_id').unsigned().references('id').inTable('diagnosticos').onDelete('CASCADE').notNullable().unique()
       t.text('contenido_html').nullable()
@@ -1445,7 +1453,7 @@ export async function runMigrations() {
 
   // Refresh tokens (rotación: cada uso revoca el anterior)
   if (!await db.schema.hasTable('refresh_tokens')) {
-    await db.schema.createTable('refresh_tokens', t => {
+    await createTable('refresh_tokens', t => {
       t.increments('id')
       t.integer('user_id').unsigned().notNullable()
         .references('id').inTable('users').index()
@@ -1586,7 +1594,7 @@ export async function runMigrations() {
 
   // Registro append-only de aceptaciones (prueba legal: fecha, ip, version)
   if (!await db.schema.hasTable('consentimientos')) {
-    await db.schema.createTable('consentimientos', t => {
+    await createTable('consentimientos', t => {
       t.increments('id')
       t.integer('user_id').unsigned().references('id').inTable('users').onDelete('CASCADE').notNullable().index()
       t.string('tipo', 40).notNullable().defaultTo('terminos')
@@ -1603,7 +1611,7 @@ export async function runMigrations() {
   // Auditoria de correos enviados (o intentos omitidos por falta de
   // consentimiento / SMTP no configurado)
   if (!await db.schema.hasTable('email_log')) {
-    await db.schema.createTable('email_log', t => {
+    await createTable('email_log', t => {
       t.increments('id')
       t.integer('user_id').unsigned().nullable().index()
       t.string('destinatario', 200).nullable()
@@ -1621,7 +1629,7 @@ export async function runMigrations() {
   // Fila unica; si existe, el mailer la prefiere sobre las variables
   // de entorno (que quedan como respaldo/fallback).
   if (!await db.schema.hasTable('smtp_config')) {
-    await db.schema.createTable('smtp_config', t => {
+    await createTable('smtp_config', t => {
       t.increments('id')
       t.string('host', 200).notNullable()
       t.integer('port').notNullable().defaultTo(465)
