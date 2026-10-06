@@ -1,5 +1,5 @@
 import db from '../db/knex.js'
-import { canAccessEmpresa } from '../middlewares/auth.js'
+import { canAccessEmpresa, esStaff } from '../middlewares/auth.js'
 import { liquidarEmpleado as calcularEmpleado } from '../nomina-calculator.js'
 import { planoNomina, planoConceptos } from '../nomina-plano.js'
 import { NOMINA_PARAMETER_FIELDS, NOMINA_JSON_FIELDS } from '../nomina-parameters.js'
@@ -161,11 +161,11 @@ export async function updateConcepto(req, res) {
 
 // GET /nominas - scoped: empresa ve solo las suyas; admin ve todas o filtra por ?empresa_id
 export async function list(req, res) {
-  const empresaId = req.user.role === 'admin'
+  const empresaId = esStaff(req.user)
     ? req.query.empresa_id
     : req.user.empresa_id
 
-  if (req.user.role !== 'admin' && !empresaId) {
+  if (!esStaff(req.user) && !empresaId) {
     return res.status(400).json({ error: 'empresa_id requerido' })
   }
 

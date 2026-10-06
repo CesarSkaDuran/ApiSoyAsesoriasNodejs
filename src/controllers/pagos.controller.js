@@ -1,5 +1,5 @@
 import db from '../db/knex.js'
-import { canAccessEmpresa } from '../middlewares/auth.js'
+import { canAccessEmpresa, esStaff } from '../middlewares/auth.js'
 import { notificarCambioEstado } from '../services/notificaciones.js'
 
 // Cuentas de cobro (viejo cuenta_cobro). status: 1=Pagado 2=Pendiente
@@ -10,7 +10,7 @@ const labelEstado = (s) => ESTADO_LABEL[Number(s)] || `Estado ${s}`
 // GET /pagos?empresa_id=&status=&search=&page=&per_page=
 export async function list(req, res) {
   const { search, status, concepto, sucursal_id, desde, hasta, page = 1, per_page = 25 } = req.query
-  const empresaId = req.user.role === 'admin' ? req.query.empresa_id : req.user.empresa_id
+  const empresaId = esStaff(req.user) ? req.query.empresa_id : req.user.empresa_id
 
   const query = db('cuentas_cobro')
     .leftJoin('empresas', 'cuentas_cobro.empresa_id', 'empresas.id')
@@ -34,7 +34,7 @@ export async function list(req, res) {
         personas.num_documento, terceros.num_documento) as cliente_nit`),
     )
 
-  if (req.user.role !== 'admin') {
+  if (!esStaff(req.user)) {
     query.where(q => {
       if (req.user.empresa_id) q.where('cuentas_cobro.empresa_id', req.user.empresa_id)
       if (req.user.persona_id) q.orWhere('cuentas_cobro.persona_id', req.user.persona_id)

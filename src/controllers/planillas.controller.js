@@ -1,11 +1,11 @@
 import db from '../db/knex.js'
-import { canAccessEmpresa } from '../middlewares/auth.js'
+import { canAccessEmpresa, esStaff } from '../middlewares/auth.js'
 
 // Planillas PILA de seguridad social.
 // GET /planillas?empresa_id=&periodo=&status=&page=&per_page=
 export async function list(req, res) {
   const { periodo, status, page = 1, per_page = 25 } = req.query
-  const empresaId = req.user.role === 'admin' ? req.query.empresa_id : req.user.empresa_id
+  const empresaId = esStaff(req.user) ? req.query.empresa_id : req.user.empresa_id
 
   const query = db('planillas')
     .leftJoin('empresas', 'planillas.empresa_id', 'empresas.id')
@@ -15,7 +15,7 @@ export async function list(req, res) {
       db.raw(`(SELECT COALESCE(SUM(nd.salario_base * nd.dias_laborados / 30), 0)
         FROM nomina_detalles nd WHERE nd.nomina_id = nominas.id) as salario_dias`))
 
-  if (req.user.role !== 'admin') {
+  if (!esStaff(req.user)) {
     query.where('planillas.empresa_id', req.user.empresa_id || -1)
   } else if (empresaId) {
     query.where('planillas.empresa_id', empresaId)

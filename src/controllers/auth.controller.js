@@ -219,7 +219,7 @@ export async function createUser(req, res) {
   if (!name || !email || !password || !role) {
     return res.status(400).json({ error: 'name, email, password y role son requeridos' })
   }
-  if (!['empresa', 'independiente', 'admin'].includes(role)) {
+  if (!['empresa', 'independiente', 'admin', 'asesor'].includes(role)) {
     return res.status(400).json({ error: 'role invalido' })
   }
 

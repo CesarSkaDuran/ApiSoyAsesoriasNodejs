@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { authMiddleware } from '../middlewares/auth.js'
+import { authMiddleware, requireModulo } from '../middlewares/auth.js'
 import {
   list as listSoportes, show as showSoporte,
   create as createSoporte, update as updateSoporte,
@@ -7,9 +7,9 @@ import {
 
 const router = Router()
 
-router.get('/', authMiddleware, listSoportes)
-router.get('/:id', authMiddleware, showSoporte)
-router.post('/', authMiddleware, createSoporte)
-router.put('/:id', authMiddleware, updateSoporte)
+router.get('/', authMiddleware, requireModulo('soportes'), listSoportes)
+router.get('/:id', authMiddleware, requireModulo('soportes'), showSoporte)
+router.post('/', authMiddleware, requireModulo('soportes'), createSoporte)
+router.put('/:id', authMiddleware, requireModulo('soportes'), updateSoporte)
 
 export default router

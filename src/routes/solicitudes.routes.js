@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { authMiddleware } from '../middlewares/auth.js'
+import { authMiddleware, requireModulo } from '../middlewares/auth.js'
 import { upload } from '../middlewares/upload.js'
 import {
   list as listSolicitudes, show as showSolicitud,
@@ -9,12 +9,12 @@ import {
 
 const router = Router()
 
-router.get('/', authMiddleware, listSolicitudes)
-router.get('/:id', authMiddleware, showSolicitud)
-router.post('/', authMiddleware, createSolicitud)
-router.put('/:id', authMiddleware, updateSolicitud)
-router.put('/:id/respuesta', authMiddleware, upload.single('file'), uploadRespuesta)
-router.get('/:id/respuesta', authMiddleware, downloadRespuesta)
-router.delete('/:id/respuesta', authMiddleware, deleteRespuesta)
+router.get('/', authMiddleware, requireModulo('solicitudes'), listSolicitudes)
+router.get('/:id', authMiddleware, requireModulo('solicitudes'), showSolicitud)
+router.post('/', authMiddleware, requireModulo('solicitudes'), createSolicitud)
+router.put('/:id', authMiddleware, requireModulo('solicitudes'), updateSolicitud)
+router.put('/:id/respuesta', authMiddleware, requireModulo('solicitudes'), upload.single('file'), uploadRespuesta)
+router.get('/:id/respuesta', authMiddleware, requireModulo('solicitudes'), downloadRespuesta)
+router.delete('/:id/respuesta', authMiddleware, requireModulo('solicitudes'), deleteRespuesta)
 
 export default router

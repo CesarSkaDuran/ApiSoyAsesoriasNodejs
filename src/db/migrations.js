@@ -1683,6 +1683,14 @@ export async function runMigrations() {
     console.log('  ~ smtp_config.correos_admin')
   }
 
+  // Rol 'asesor': staff interno multi-empresa limitado por user_modulos.
+  // No tiene scope de cliente (empresa_id/persona_id) ni el bypass de admin.
+  const [usersRoleCol] = await db.raw("SHOW COLUMNS FROM users LIKE 'role'")
+  if (usersRoleCol[0] && !usersRoleCol[0].Type.includes('asesor')) {
+    await db.raw("ALTER TABLE users MODIFY COLUMN role ENUM('admin','empresa','independiente','asesor') NULL DEFAULT 'empresa'")
+    console.log('  ~ users.role +asesor')
+  }
+
   // Identidad global por documento: enlaza empleados.persona_id, añade
   // fecha_nacimiento/es_independiente, UNIQUE(num_documento) y el índice
   // único parcial (persona_id, empresa_activa_id) para el multi-empleo.

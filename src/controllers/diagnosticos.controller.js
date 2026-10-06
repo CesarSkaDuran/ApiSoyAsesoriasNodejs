@@ -1,4 +1,5 @@
 import db from '../db/knex.js'
+import { esStaff } from '../middlewares/auth.js'
 import { createReadStream, existsSync } from 'fs'
 import { resolve } from 'path'
 import { notificarAdmins, notificarCambioEstado } from '../services/notificaciones.js'
@@ -16,7 +17,7 @@ const TIPOS_RESPUESTA = ['texto', 'textarea', 'numero', 'fecha', 'opciones', 'mu
 const STORAGE_DIR = resolve(process.env.STORAGE_DIR || 'storage/documentos')
 
 function puedeVer(user, d) {
-  if (user.role === 'admin') return true
+  if (esStaff(user)) return true
   if (user.role === 'empresa') return d.empresa_id && d.empresa_id === user.empresa_id
   if (user.role === 'independiente') return d.persona_id && d.persona_id === user.persona_id
   return false
@@ -259,7 +260,7 @@ export async function saveRespuestas(req, res) {
   res.json({ ok: true })
 
   // Cliente diligencia la entrevista -> avisar a los admins
-  if (req.user.role !== 'admin') {
+  if (!esStaff(req.user)) {
     notificarAdmins({
       entidad: 'diagnostico', entidadId: d.id,
       titulo: 'Respuestas de diagnóstico recibidas',
@@ -320,10 +321,10 @@ export async function uploadDocumento(req, res) {
     mime_type: req.file.mimetype,
     tamano_bytes: req.file.size,
     // Al subir, el cliente lo deja "en revisión"; el staff lo aprueba/rechaza
-    estado: req.user.role === 'admin' ? (req.body.estado || 'revisar') : 'revisar',
+    estado: esStaff(req.user) ? (req.body.estado || 'revisar') : 'revisar',
     comentarios_revision: req.body.comentarios || null,
   }
-  if (req.user.role === 'admin' && DOC_ESTADOS.includes(req.body.estado)) {
+  if (esStaff(req.user) && DOC_ESTADOS.includes(req.body.estado)) {
     payload.fecha_revision = db.fn.now()
     payload.revisado_por = req.user.id
   }
@@ -336,7 +337,7 @@ export async function uploadDocumento(req, res) {
   res.status(201).json({ ok: true })
 
   // Cliente sube documento requerido -> avisar a los admins
-  if (req.user.role !== 'admin') {
+  if (!esStaff(req.user)) {
     notificarAdmins({
       entidad: 'diagnostico', entidadId: d.id,
       titulo: 'Documento de diagnóstico cargado',

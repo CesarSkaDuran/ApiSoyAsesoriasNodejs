@@ -1,7 +1,7 @@
 import db from '../db/knex.js'
 import { resolve, sep } from 'path'
 import { createReadStream, existsSync, unlinkSync } from 'fs'
-import { canAccessEmpresa } from '../middlewares/auth.js'
+import { canAccessEmpresa, esStaff } from '../middlewares/auth.js'
 import { createNotifications, publishNotifications } from '../realtime/notifications.js'
 import { notificarAdmins } from '../services/notificaciones.js'
 
@@ -47,7 +47,7 @@ async function duenoDeDoc(ownerCol, ownerId) {
 
 // Fail closed: si el owner no resuelve a empresa ni persona, se niega el acceso
 function canAccessDoc(user, empresaId, personaId) {
-  if (user.role === 'admin') return true
+  if (esStaff(user)) return true
   if (empresaId !== null) return canAccessEmpresa(user, empresaId)
   if (personaId !== null) return user.persona_id === personaId
   return false
@@ -56,7 +56,7 @@ function canAccessDoc(user, empresaId, personaId) {
 // GET /documentos/tipos - catalogo de items de documento (admin ve todos)
 export async function listTipos(req, res) {
   const q = db('documento_tipos').orderBy([{ column: 'orden' }, { column: 'nombre' }])
-  if (req.user.role !== 'admin') q.where('activo', true)
+  if (!esStaff(req.user)) q.where('activo', true)
   res.json({ data: await q })
 }
 
@@ -105,7 +105,7 @@ export async function uploadDoc(req, res) {
     })
 
     // Cuando el cliente carga un documento, se notifica a los administradores
-    if (req.user.role !== 'admin') {
+    if (!esStaff(req.user)) {
       const admins = await trx('users').select('id').where('role', 'admin').where('is_active', true)
       notificationRows = await createNotifications(trx, admins.map(a => a.id), {
         titulo: 'Documento cargado por un cliente',
@@ -122,7 +122,7 @@ export async function uploadDoc(req, res) {
   res.status(201).json({ documento })
 
   // Cliente carga documento -> correo a los admins (in-app ya creada arriba)
-  if (req.user.role !== 'admin') {
+  if (!esStaff(req.user)) {
     notificarAdmins({
       entidad: 'documento', entidadId: documento.id,
       titulo: 'Documento cargado por un cliente',
@@ -155,7 +155,7 @@ export async function update(req, res) {
     const tipo = await db('documento_tipos').where('id', data.tipo_id).where('activo', true).first()
     if (!tipo) return res.status(400).json({ error: 'Tipo de documento no válido' })
   }
-  if (req.user.role === 'admin' && req.body.estatus !== undefined) {
+  if (esStaff(req.user) && req.body.estatus !== undefined) {
     if (!DOC_ESTATUS.includes(req.body.estatus)) {
       return res.status(400).json({ error: 'Estatus no válido' })
     }
@@ -169,7 +169,7 @@ export async function update(req, res) {
   const documento = await db.transaction(async trx => {
     await trx('documentos').where('id', doc.id).update(data)
 
-    if (req.user.role === 'admin' && data.estatus && data.estatus !== doc.estatus) {
+    if (esStaff(req.user) && data.estatus && data.estatus !== doc.estatus) {
       const userId = empresaId
         ? (await trx('empresas').select('user_id').where('id', empresaId).first())?.user_id
         : personaId
@@ -199,7 +199,7 @@ export async function update(req, res) {
 // GET /documentos?empresa_id= | ?empleado_id= | ?nomina_id= ... | ?all=1 (admin)
 export async function list(req, res) {
   const ownerCol = OWNERS.find(o => req.query[o])
-  const wantAll = req.user.role === 'admin' && ['1', 'true'].includes(String(req.query.all))
+  const wantAll = esStaff(req.user) && ['1', 'true'].includes(String(req.query.all))
   if (!ownerCol && !wantAll) {
     return res.status(400).json({ error: `Indique filtro: ${OWNERS.join(', ')}` })
   }
@@ -291,7 +291,7 @@ export async function remove(req, res) {
   await db.transaction(async trx => {
     await trx('documentos').where('id', doc.id).delete()
 
-    if (req.user.role !== 'admin') {
+    if (!esStaff(req.user)) {
       const admins = await trx('users').select('id').where('role', 'admin').where('is_active', true)
       notificationRows = await createNotifications(trx, admins.map(a => a.id), {
         titulo: 'Documento eliminado por un cliente',

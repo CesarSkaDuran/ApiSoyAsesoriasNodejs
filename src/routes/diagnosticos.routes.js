@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { authMiddleware, requireRole } from '../middlewares/auth.js'
+import { authMiddleware, requireRole, requireModulo } from '../middlewares/auth.js'
 import { upload } from '../middlewares/upload.js'
 import {
   list as listDiagnosticos, show as showDiagnostico, create as createDiagnostico,
@@ -15,26 +15,26 @@ import {
 //   /diagnosticos y /diagnostico-config
 const router = Router()
 
-router.get('/diagnosticos', authMiddleware, listDiagnosticos)
-router.post('/diagnosticos', authMiddleware, requireRole('admin'), createDiagnostico)
-router.get('/diagnosticos/documentos/:docId/download', authMiddleware, downloadDocumento)
-router.put('/diagnosticos/documentos/:docId', authMiddleware, requireRole('admin'), revisarDocumento)
-router.get('/diagnosticos/:id', authMiddleware, showDiagnostico)
-router.put('/diagnosticos/:id', authMiddleware, requireRole('admin'), updateDiagnostico)
-router.put('/diagnosticos/:id/estado', authMiddleware, updateEstado)
-router.delete('/diagnosticos/:id', authMiddleware, requireRole('admin'), removeDiagnostico)
+router.get('/diagnosticos', authMiddleware, requireModulo('diagnosticos'), listDiagnosticos)
+router.post('/diagnosticos', authMiddleware, requireRole('admin', 'asesor'), requireModulo('diagnosticos'), createDiagnostico)
+router.get('/diagnosticos/documentos/:docId/download', authMiddleware, requireModulo('diagnosticos'), downloadDocumento)
+router.put('/diagnosticos/documentos/:docId', authMiddleware, requireRole('admin', 'asesor'), requireModulo('diagnosticos'), revisarDocumento)
+router.get('/diagnosticos/:id', authMiddleware, requireModulo('diagnosticos'), showDiagnostico)
+router.put('/diagnosticos/:id', authMiddleware, requireRole('admin', 'asesor'), requireModulo('diagnosticos'), updateDiagnostico)
+router.put('/diagnosticos/:id/estado', authMiddleware, requireModulo('diagnosticos'), updateEstado)
+router.delete('/diagnosticos/:id', authMiddleware, requireRole('admin', 'asesor'), requireModulo('diagnosticos'), removeDiagnostico)
 
 // entrevista
-router.get('/diagnosticos/:id/entrevista', authMiddleware, entrevista)
-router.put('/diagnosticos/:id/respuestas', authMiddleware, saveRespuestas)
+router.get('/diagnosticos/:id/entrevista', authMiddleware, requireModulo('diagnosticos'), entrevista)
+router.put('/diagnosticos/:id/respuestas', authMiddleware, requireModulo('diagnosticos'), saveRespuestas)
 
 // documentos del diagnóstico
-router.get('/diagnosticos/:id/documentos', authMiddleware, diagDocumentos)
-router.post('/diagnosticos/:id/documentos/:configId', authMiddleware, upload.single('archivo'), uploadDocumento)
+router.get('/diagnosticos/:id/documentos', authMiddleware, requireModulo('diagnosticos'), diagDocumentos)
+router.post('/diagnosticos/:id/documentos/:configId', authMiddleware, requireModulo('diagnosticos'), upload.single('archivo'), uploadDocumento)
 
 // informe
-router.get('/diagnosticos/:id/informe', authMiddleware, getInforme)
-router.put('/diagnosticos/:id/informe', authMiddleware, requireRole('admin'), saveInforme)
+router.get('/diagnosticos/:id/informe', authMiddleware, requireModulo('diagnosticos'), getInforme)
+router.put('/diagnosticos/:id/informe', authMiddleware, requireRole('admin', 'asesor'), requireModulo('diagnosticos'), saveInforme)
 
 // configuración (admin)
 const config = Router()

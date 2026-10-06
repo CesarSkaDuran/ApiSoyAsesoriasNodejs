@@ -1,4 +1,5 @@
 import db from '../db/knex.js'
+import { esStaff } from '../middlewares/auth.js'
 import { notificarAdmins, notificarCambioEstado } from '../services/notificaciones.js'
 
 // Tickets de soporte (viejo soporte). status numerico: 1=Pendiente
@@ -16,7 +17,7 @@ export async function list(req, res) {
     .select('soportes.*', 'users.name as user_name', 'users.lastname as user_lastname',
       'empresas.razon_social as empresa_nombre')
 
-  if (req.user.role !== 'admin') query.where('soportes.user_id', req.user.id)
+  if (!esStaff(req.user)) query.where('soportes.user_id', req.user.id)
   if (status) query.where('soportes.status', status)
   if (desde) query.where('soportes.created_at', '>=', `${desde} 00:00:00`)
   if (hasta) query.where('soportes.created_at', '<=', `${hasta} 23:59:59`)
@@ -51,7 +52,7 @@ export async function show(req, res) {
     .where('soportes.id', req.params.id)
     .first()
   if (!soporte) return res.status(404).json({ error: 'Ticket no encontrado' })
-  if (req.user.role !== 'admin' && soporte.user_id !== req.user.id) {
+  if (!esStaff(req.user) && soporte.user_id !== req.user.id) {
     return res.status(403).json({ error: 'Sin acceso' })
   }
   res.json({ soporte })
@@ -77,7 +78,7 @@ export async function create(req, res) {
   res.status(201).json({ soporte })
 
   // Cliente abre ticket -> avisar a los admins (in-app + correo)
-  if (req.user.role !== 'admin') {
+  if (!esStaff(req.user)) {
     notificarAdmins({
       entidad: 'soporte', entidadId: soporte.id,
       titulo: 'Nuevo ticket de soporte',
@@ -92,11 +93,11 @@ export async function create(req, res) {
 export async function update(req, res) {
   const soporte = await db('soportes').where('id', req.params.id).first()
   if (!soporte) return res.status(404).json({ error: 'Ticket no encontrado' })
-  if (req.user.role !== 'admin' && soporte.user_id !== req.user.id) {
+  if (!esStaff(req.user) && soporte.user_id !== req.user.id) {
     return res.status(403).json({ error: 'Sin acceso' })
   }
 
-  const CAMPOS = req.user.role === 'admin'
+  const CAMPOS = esStaff(req.user)
     ? ['asunto', 'mensaje', 'status', 'tipo_servicio']
     : ['mensaje']
   const data = {}
@@ -109,7 +110,7 @@ export async function update(req, res) {
   res.json({ soporte: await db('soportes').where('id', soporte.id).first() })
 
   // Cliente respondio el ticket -> avisar a los admins
-  if (req.user.role !== 'admin' && data.mensaje !== undefined) {
+  if (!esStaff(req.user) && data.mensaje !== undefined) {
     notificarAdmins({
       entidad: 'soporte', entidadId: soporte.id,
       titulo: 'Respuesta en ticket de soporte',

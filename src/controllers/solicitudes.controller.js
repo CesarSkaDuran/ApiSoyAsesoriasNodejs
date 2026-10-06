@@ -1,7 +1,7 @@
 import db from '../db/knex.js'
 import { resolve, sep } from 'path'
 import { createReadStream, existsSync, unlinkSync } from 'fs'
-import { canAccessEmpresa } from '../middlewares/auth.js'
+import { canAccessEmpresa, esStaff } from '../middlewares/auth.js'
 import { createNotifications, publishNotifications } from '../realtime/notifications.js'
 import { notificarAdmins, notificarCambioEstado } from '../services/notificaciones.js'
 
@@ -9,7 +9,7 @@ const STORAGE_DIR = resolve(process.env.STORAGE_DIR || 'storage/documentos')
 
 // Acceso a la solicitud: admin o el cliente dueño (empresa o independiente)
 function canAccessSolicitud(user, solicitud) {
-  if (user.role === 'admin') return true
+  if (esStaff(user)) return true
   return canAccessEmpresa(user, solicitud.empresa_id) || solicitud.persona_id === user.persona_id
 }
 
@@ -25,7 +25,7 @@ async function clientUserId(trx, solicitud) {
 // GET /solicitudes?empresa_id=&status=&page=&per_page=
 export async function list(req, res) {
   const { search, status, desde, hasta, page = 1, per_page = 25 } = req.query
-  const empresaId = req.user.role === 'admin' ? req.query.empresa_id : req.user.empresa_id
+  const empresaId = esStaff(req.user) ? req.query.empresa_id : req.user.empresa_id
 
   const query = db('solicitudes')
     .leftJoin('empresas', 'solicitudes.empresa_id', 'empresas.id')
@@ -44,7 +44,7 @@ export async function list(req, res) {
         personas.num_documento) as cliente_nit`),
       db.raw(`COALESCE(empresas.telefono_contacto, personas.telefono) as telefono`))
 
-  if (req.user.role !== 'admin') {
+  if (!esStaff(req.user)) {
     query.where(q => {
       if (req.user.empresa_id) q.where('solicitudes.empresa_id', req.user.empresa_id)
       if (req.user.persona_id) q.orWhere('solicitudes.persona_id', req.user.persona_id)
@@ -95,7 +95,7 @@ export async function show(req, res) {
     .where('solicitudes.id', req.params.id)
     .first()
   if (!solicitud) return res.status(404).json({ error: 'Solicitud no encontrada' })
-  if (req.user.role !== 'admin' &&
+  if (!esStaff(req.user) &&
       !canAccessEmpresa(req.user, solicitud.empresa_id) &&
       solicitud.persona_id !== req.user.persona_id) {
     return res.status(403).json({ error: 'Sin acceso' })
@@ -105,9 +105,9 @@ export async function show(req, res) {
 
 // POST /solicitudes - cliente crea solicitud; admin puede crear para cualquiera
 export async function create(req, res) {
-  const empresaId = req.user.role === 'admin' ? req.body.empresa_id : req.user.empresa_id
-  const personaId = req.user.role === 'admin' ? req.body.persona_id : req.user.persona_id
-  if (!empresaId && !personaId && req.user.role !== 'admin') {
+  const empresaId = esStaff(req.user) ? req.body.empresa_id : req.user.empresa_id
+  const personaId = esStaff(req.user) ? req.body.persona_id : req.user.persona_id
+  if (!empresaId && !personaId && !esStaff(req.user)) {
     return res.status(400).json({ error: 'empresa_id o persona_id requerido' })
   }
 
@@ -121,7 +121,7 @@ export async function create(req, res) {
       status: 'pendiente',
     })
     const created = await trx('solicitudes').where('id', id).first()
-    const recipients = req.user.role === 'admin'
+    const recipients = esStaff(req.user)
       ? empresaId
         ? (await trx('empresas').select('user_id').where('id', empresaId).first())?.user_id
         : personaId
@@ -130,7 +130,7 @@ export async function create(req, res) {
       : (await trx('users').select('id').where('role', 'admin').where('is_active', true)).map(user => user.id)
 
     notificationRows = await createNotifications(trx, Array.isArray(recipients) ? recipients : recipients ? [recipients] : [], {
-      titulo: req.user.role === 'admin' ? 'Nueva solicitud de servicio' : 'Nueva solicitud recibida',
+      titulo: esStaff(req.user) ? 'Nueva solicitud de servicio' : 'Nueva solicitud recibida',
       mensaje: `Solicitud #${id}: ${created.descripcion || 'Servicio solicitado'}`,
       solicitudId: id,
       url: '/admin/solicitudes',
@@ -142,7 +142,7 @@ export async function create(req, res) {
   res.status(201).json({ solicitud })
 
   // Cliente crea -> correo a los admins (la notificacion in-app ya se creo arriba)
-  if (req.user.role !== 'admin') {
+  if (!esStaff(req.user)) {
     notificarAdmins({
       entidad: 'solicitud', entidadId: solicitud.id,
       titulo: 'Nueva solicitud recibida',
@@ -161,7 +161,7 @@ export async function update(req, res) {
 
   const data = {}
   const notifications = []
-  if (req.user.role === 'admin') {
+  if (esStaff(req.user)) {
     for (const campo of ['descripcion', 'servicio_id', 'observaciones']) {
       if (req.body[campo] !== undefined) data[campo] = req.body[campo]
     }
@@ -275,7 +275,7 @@ export async function update(req, res) {
 
 // PUT /solicitudes/:id/respuesta - el admin adjunta el documento/respuesta de la solicitud
 export async function uploadRespuesta(req, res) {
-  if (req.user.role !== 'admin') {
+  if (!esStaff(req.user)) {
     if (req.file) unlinkSync(req.file.path)
     return res.status(403).json({ error: 'Solo el administrador puede adjuntar la respuesta' })
   }
@@ -342,7 +342,7 @@ export async function downloadRespuesta(req, res) {
 
 // DELETE /solicitudes/:id/respuesta - el admin retira el documento de respuesta
 export async function deleteRespuesta(req, res) {
-  if (req.user.role !== 'admin') {
+  if (!esStaff(req.user)) {
     return res.status(403).json({ error: 'Solo el administrador puede eliminar la respuesta' })
   }
   const solicitud = await db('solicitudes').where('id', req.params.id).first()

@@ -3,8 +3,8 @@ import db from '../db/knex.js'
 
 // Verifica JWT y carga el usuario con su empresa/persona y permisos.
 // A diferencia del sistema viejo, req.user SIEMPRE trae el scope:
-//   req.user.empresa_id  -> empresa a la que pertenece (null para admin)
-//   req.user.modulos     -> permisos por modulo
+//   req.user.empresa_id  -> empresa a la que pertenece (null para admin/asesor)
+//   req.user.modulos     -> permisos por modulo (obligatorios para 'asesor')
 export async function authMiddleware(req, res, next) {
   const header = req.headers.authorization
   if (!header || !header.startsWith('Bearer ')) {
@@ -52,12 +52,32 @@ export function requireRole(...roles) {
   }
 }
 
+// Staff interno sin scope de cliente: admin (irrestricto) o asesor
+// (limitado por user_modulos en la capa de rutas). En los controllers,
+// donde antes se comparaba role === 'admin' para decidir "staff vs
+// cliente", se usa este helper.
+export function esStaff(user) {
+  return user.role === 'admin' || user.role === 'asesor'
+}
+
+// Gate por modulo para el rol 'asesor' (staff interno limitado por
+// user_modulos). admin pasa siempre; empresa/independiente no se filtran
+// aqui: su acceso lo determina el scope de tenant, no los checkboxes.
+export function requireModulo(modulo) {
+  return (req, res, next) => {
+    if (req.user.role === 'asesor' && !req.user.modulos?.[modulo]) {
+      return res.status(403).json({ error: 'Sin permiso para este modulo' })
+    }
+    next()
+  }
+}
+
 // Resuelve el empresa_id efectivo del request.
 // - admin: puede operar sobre cualquier empresa (param :empresaId o query)
 // - empresa: SIEMPRE forzado a su propia empresa_id (ignora lo que mande el cliente)
 export function scopeEmpresa(paramName = 'empresaId') {
   return (req, res, next) => {
-    if (req.user.role === 'admin') {
+    if (req.user.role === 'admin' || req.user.role === 'asesor') {
       const fromParam = req.params[paramName] || req.query.empresa_id || req.body.empresa_id
       req.empresaId = fromParam ? Number(fromParam) : null
       return next()
@@ -75,6 +95,6 @@ export function scopeEmpresa(paramName = 'empresaId') {
 
 // Verifica que un recurso pertenezca a la empresa del usuario (o admin)
 export function canAccessEmpresa(user, empresaId) {
-  if (user.role === 'admin') return true
+  if (user.role === 'admin' || user.role === 'asesor') return true
   return user.empresa_id === Number(empresaId)
 }

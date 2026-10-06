@@ -1,5 +1,5 @@
 import db from '../db/knex.js'
-import { canAccessEmpresa } from '../middlewares/auth.js'
+import { canAccessEmpresa, esStaff } from '../middlewares/auth.js'
 import { createNotifications, publishNotifications } from '../realtime/notifications.js'
 
 // Registros de servicios prestados (viejo detalle_servicios).
@@ -20,7 +20,7 @@ function rutaCategoriaServicio(nombre) {
 export async function listRegistros(req, res) {
   const { search, nombre, status, status_pago, desde, hasta, page = 1, per_page = 25 } = req.query
 
-  const empresaId = req.user.role === 'admin' ? req.query.empresa_id : req.user.empresa_id
+  const empresaId = esStaff(req.user) ? req.query.empresa_id : req.user.empresa_id
 
   const query = db('servicio_registros')
     .leftJoin('empresas', 'servicio_registros.empresa_id', 'empresas.id')
@@ -49,7 +49,7 @@ export async function listRegistros(req, res) {
       db.raw(`COALESCE(empresas.telefono_contacto, personas.telefono) as telefono`),
     )
 
-  if (req.user.role !== 'admin') {
+  if (!esStaff(req.user)) {
     // empresa/independiente: solo lo suyo
     query.where(q => {
       if (req.user.empresa_id) q.where('servicio_registros.empresa_id', req.user.empresa_id)
@@ -96,8 +96,8 @@ export async function showRegistro(req, res) {
 
 // POST /servicio-registros - admin o cliente solicita un servicio
 export async function createRegistro(req, res) {
-  const empresaId = req.user.role === 'admin' ? req.body.empresa_id : req.user.empresa_id
-  const personaId = req.user.role === 'admin' ? req.body.persona_id : req.user.persona_id
+  const empresaId = esStaff(req.user) ? req.body.empresa_id : req.user.empresa_id
+  const personaId = esStaff(req.user) ? req.body.persona_id : req.user.persona_id
   if (!empresaId && !personaId) return res.status(400).json({ error: 'empresa_id o persona_id requerido' })
 
   // El empleado ligado al servicio debe pertenecer a la misma empresa

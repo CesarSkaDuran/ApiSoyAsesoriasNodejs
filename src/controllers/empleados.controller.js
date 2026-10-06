@@ -1,5 +1,5 @@
 import db from '../db/knex.js'
-import { canAccessEmpresa } from '../middlewares/auth.js'
+import { canAccessEmpresa, esStaff } from '../middlewares/auth.js'
 import { resolverIdentidad, personaPublica, normalizarDocumento, errorIdentidad } from '../services/personas-identidad.js'
 
 const CAMPOS = [
@@ -69,11 +69,11 @@ function normalizarNombres(data) {
 
 // GET /empleados - scoped: empresa ve solo los suyos; admin filtra por ?empresa_id
 export async function list(req, res) {
-  const empresaId = req.user.role === 'admin'
+  const empresaId = esStaff(req.user)
     ? req.query.empresa_id
     : req.user.empresa_id
 
-  if (req.user.role !== 'admin' && !empresaId) {
+  if (!esStaff(req.user) && !empresaId) {
     return res.status(400).json({ error: 'empresa_id requerido' })
   }
 
@@ -164,7 +164,7 @@ async function contratarEnEmpresa(req, res, nuevoEndpoint) {
   for (const campo of CAMPOS) {
     if (req.body[campo] !== undefined) data[campo] = req.body[campo]
   }
-  data.status = nuevoEndpoint || req.user.role !== 'admin' ? 'activo' : (data.status || 'activo')
+  data.status = nuevoEndpoint || !esStaff(req.user) ? 'activo' : (data.status || 'activo')
   if (!['activo', 'retirado', 'suspendido'].includes(data.status)) return res.status(400).json({ error: 'Estado de empleado no válido' })
   if (nuevoEndpoint && (!Number.isFinite(Number(data.salario_base)) || Number(data.salario_base) <= 0)) {
     return res.status(400).json({ error: 'Indica un salario mayor a cero' })
@@ -222,7 +222,7 @@ export async function update(req, res) {
   const cambioEstado = data.status !== undefined && data.status !== empleado.status
   const cambioIngreso = data.fecha_ingreso !== undefined && fechaUtc(data.fecha_ingreso) !== fechaUtc(empleado.fecha_ingreso)
   const cambioRetiro = data.fecha_retiro !== undefined && fechaUtc(data.fecha_retiro) !== fechaUtc(empleado.fecha_retiro)
-  if (req.user.role !== 'admin' && (cambioEstado || cambioIngreso || cambioRetiro)) {
+  if (!esStaff(req.user) && (cambioEstado || cambioIngreso || cambioRetiro)) {
     return res.status(403).json({ error: 'Solo un administrador puede cambiar el estado o las fechas del vínculo laboral' })
   }
   if (Object.keys(data).length === 0) {

@@ -1,5 +1,5 @@
 import db from '../db/knex.js'
-import { canAccessEmpresa } from '../middlewares/auth.js'
+import { canAccessEmpresa, esStaff } from '../middlewares/auth.js'
 
 const CAMPOS = [
   'razon_social', 'tipo_documento', 'num_documento', 'dv', 'tipo_empresa',
@@ -36,7 +36,7 @@ export async function list(req, res) {
 
   if (req.user.role === 'empresa') {
     query.where('empresas.id', req.user.empresa_id)
-  } else if (req.user.role !== 'admin') {
+  } else if (!esStaff(req.user)) {
     // independiente u otros roles no ven el directorio de empresas
     query.whereRaw('1=0')
   }
@@ -104,7 +104,7 @@ export async function update(req, res) {
     return res.status(403).json({ error: 'Sin acceso a esta empresa' })
   }
 
-  const permitidos = req.user.role === 'admin'
+  const permitidos = esStaff(req.user)
     ? CAMPOS
     : ['direccion', 'telefono_movil', 'email_contacto', 'nombre_contacto', 'telefono_contacto', 'imagen']
 

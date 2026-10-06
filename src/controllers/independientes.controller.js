@@ -1,4 +1,5 @@
 import db from '../db/knex.js'
+import { esStaff } from '../middlewares/auth.js'
 import { normalizarDocumento, personaPublica } from '../services/personas-identidad.js'
 
 // Trabajadores independientes (personas). Admin ve todos; el independiente
@@ -42,7 +43,7 @@ export async function list(req, res) {
 
   if (req.user.role === 'independiente') {
     query.where('personas.id', req.user.persona_id || -1)
-  } else if (req.user.role !== 'admin') {
+  } else if (!esStaff(req.user)) {
     query.whereRaw('1=0')
   }
 
@@ -106,7 +107,7 @@ export async function update(req, res) {
   }
   if (req.user.role === 'empresa') return res.status(403).json({ error: 'Sin acceso' })
 
-  const permitidos = req.user.role === 'admin'
+  const permitidos = esStaff(req.user)
     ? CAMPOS
     : ['direccion', 'telefono', 'email', 'departamento_id', 'ciudad_id']
   const data = {}

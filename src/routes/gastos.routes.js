@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { authMiddleware, requireRole } from '../middlewares/auth.js'
+import { authMiddleware, requireRole, requireModulo } from '../middlewares/auth.js'
 import {
   list as listGastos, show as showGasto, create as createGasto,
   update as updateGasto, remove as removeGasto,
@@ -7,7 +7,7 @@ import {
 
 const router = Router()
 
-router.use(authMiddleware, requireRole('admin'))
+router.use(authMiddleware, requireRole('admin', 'asesor'), requireModulo('gastos'))
 router.get('/', listGastos)
 router.get('/:id', showGasto)
 router.post('/', createGasto)
