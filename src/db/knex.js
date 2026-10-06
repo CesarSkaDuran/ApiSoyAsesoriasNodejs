@@ -29,8 +29,12 @@ const db = knex({
     // El servidor anterior de la app no tenía ONLY_FULL_GROUP_BY; las
     // consultas con COUNT(*) + joins asumen ese comportamiento. Se ajusta
     // por conexión para que WAMP (5.7) y MySQL 8 se comporten igual.
+    // time_zone=UTC alinea la sesión con timezone:'Z' del driver: las
+    // columnas TIMESTAMP se almacenan internamente en UTC, así la lectura
+    // devuelve UTC real y el navegador convierte a su hora local. Sin
+    // esto, los TIMESTAMP salían con el desfase de la zona del servidor.
     afterCreate(conn, done) {
-      conn.query("SET SESSION sql_mode = 'IGNORE_SPACE,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION'", (err) => {
+      conn.query("SET SESSION sql_mode = 'IGNORE_SPACE,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION', time_zone = '+00:00'", (err) => {
         done(err, conn)
       })
     },
