@@ -9,7 +9,7 @@ import db from '../src/db/knex.js'
 process.env.NODE_ENV = 'test'
 
 export const ADMIN = { email: 'admin@soyasesorias.com', password: '1234567' }
-export const EMPRESA = { email: 'soyasesorias@prueba.com', password: '1234567' }
+export const EMPRESA = { email: 'soyasesorias@prueba.com', password: '12345678' }
 
 let server, baseUrl, startPromise
 
@@ -70,4 +70,21 @@ export async function loginAs({ email, password }) {
   }
   tokenCache.set(email, res.data)
   return res.data // { token, refresh_token, user }
+}
+
+// Identidad global de prueba: crea la persona si no existe (los tests
+// insertan empleados directamente y ahora empleados.persona_id es NOT NULL).
+export async function ensurePersona(num_documento, datos = {}) {
+  const existente = await db('personas').where({ num_documento }).first()
+  if (existente) return existente.id
+  const [id] = await db('personas').insert({
+    primer_nombre: datos.primer_nombre || 'PRUEBA',
+    primer_apellido: datos.primer_apellido || 'IDENTIDAD',
+    tipo_documento: datos.tipo_documento || 'CC',
+    num_documento,
+    fecha_nacimiento: datos.fecha_nacimiento || null,
+    status: 'activo',
+    es_independiente: false,
+  })
+  return id
 }

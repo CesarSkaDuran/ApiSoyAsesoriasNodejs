@@ -29,6 +29,27 @@
   (ficha o input de liquidación); sin él el endpoint responde 400 con
   `empleados_bloqueados` (id, nombre, documento, salario).
 - `ingreso_noc_incr` solo se persiste cuando el ingreso plano > 0.
+- La recontratación archiva el vínculo cerrado en `empleado_periodos` y conserva
+  el ID del empleado. `empleados` debe usar InnoDB para bloquear recontrataciones
+  simultáneas; las migraciones convierten tablas MyISAM existentes sin borrar filas.
+
+## Identidad global y multi-empleo
+
+- `personas` es la identidad global (`UNIQUE(num_documento)`); `empleados` es el
+  vínculo laboral por empresa (`empleados.persona_id` NOT NULL + FK).
+  `personas.es_independiente` distingue perfiles del módulo independientes.
+- Duplicado activo por empresa: columna generada `empresa_activa_id`
+  (`empresa_id` si `status='activo'`, NULL si no) + `UNIQUE(persona_id,
+  empresa_activa_id)` — MySQL no tiene índices parciales.
+- `POST /empleados/contratar` resuelve la identidad con
+  `services/personas-identidad.js` dentro de transacción (`FOR UPDATE` +
+  retry ante deadlock); `POST /empleados` delega al mismo flujo.
+- `GET /personas/buscar?documento=` es búsqueda ciega: solo
+  id/nombre/documento/fecha_nacimiento, jamás empresa ni datos del tenant.
+- `migrate-identidades.js` corre al final de `runMigrations`: diagnostica
+  duplicados (no los fusiona), convierte engines, crea identidades para
+  empleados existentes y agrega índices/FKs de forma idempotente.
+- `ensurePersona(doc)` en test/helpers crea identidades para inserts directos.
 - Los DECIMAL llegan como string desde MySQL: coerción `Number()`
   explícita en cualquier suma de parámetros (bug histórico de NaN en el
   estimado del frontend).

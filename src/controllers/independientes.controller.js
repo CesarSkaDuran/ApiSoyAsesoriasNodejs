@@ -1,7 +1,26 @@
 import db from '../db/knex.js'
+import { normalizarDocumento, personaPublica } from '../services/personas-identidad.js'
 
 // Trabajadores independientes (personas). Admin ve todos; el independiente
 // solo su propio registro (via req.user.persona_id).
+
+// GET /personas/buscar?documento=XXX — búsqueda ciega de identidad.
+// Solo expone cédula, nombre y fecha de nacimiento: nunca empresa,
+// historial, documentos ni observaciones. Sirve para que admin/empresa
+// detecten si una cédula ya tiene identidad global al contratar.
+export async function buscar(req, res) {
+  if (!['admin', 'empresa'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Sin acceso' })
+  }
+  const documento = normalizarDocumento(req.query.documento)
+  if (!documento) return res.status(400).json({ error: 'documento requerido' })
+  const persona = await db('personas')
+    .select('id', 'primer_nombre', 'segundo_nombre', 'primer_apellido', 'segundo_apellido', 'num_documento', 'fecha_nacimiento')
+    .where('num_documento', documento)
+    .first()
+  if (!persona) return res.json({ existe: false })
+  res.json({ existe: true, persona: personaPublica(persona) })
+}
 
 const CAMPOS = [
   'primer_nombre', 'segundo_nombre', 'primer_apellido', 'segundo_apellido',
@@ -67,7 +86,7 @@ export async function show(req, res) {
 
 // POST /personas - admin registra independiente
 export async function create(req, res) {
-  const data = { tipo_afiliacion: 'independiente' }
+  const data = { tipo_afiliacion: 'independiente', es_independiente: true }
   for (const campo of CAMPOS) {
     if (req.body[campo] !== undefined) data[campo] = req.body[campo]
   }

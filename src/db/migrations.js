@@ -1,5 +1,6 @@
 import db from './knex.js'
 import { NOMINA_PARAMETER_DEFAULTS, NOMINA_JSON_FIELDS } from '../nomina-parameters.js'
+import { migrateIdentidades } from './migrate-identidades.js'
 
 // Schema nuevo para SoyAsesorias.
 // InnoDB + FKs reales + indices. Montos DECIMAL, fechas DATE/DATETIME.
@@ -332,6 +333,28 @@ export async function runMigrations() {
       t.unique(['empresa_id', 'numero_documento'])
     })
     console.log('  + empleados')
+  }
+
+  const [empleadoTableStatus] = await db.raw("SHOW TABLE STATUS WHERE Name = 'empleados'")
+  if (empleadoTableStatus[0]?.Engine !== 'InnoDB') {
+    await db.raw('ALTER TABLE empleados ENGINE=InnoDB')
+    console.log('  ~ empleados ENGINE=InnoDB')
+  }
+
+  if (!await db.schema.hasTable('empleado_periodos')) {
+    await db.schema.createTable('empleado_periodos', t => {
+      t.increments('id')
+      t.integer('empleado_id').unsigned().notNullable().index().references('id').inTable('empleados').onDelete('CASCADE')
+      t.integer('empresa_id').unsigned().notNullable()
+      t.date('fecha_ingreso').nullable()
+      t.date('fecha_retiro').notNullable()
+      t.string('tipo_contrato', 40).nullable()
+      t.decimal('salario_base', 15, 2).notNullable()
+      t.json('condiciones').notNullable()
+      t.integer('registrado_por').unsigned().nullable()
+      t.timestamps(true, true)
+    })
+    console.log('  + empleado_periodos')
   }
 
   if (!await db.schema.hasTable('beneficiados')) {
@@ -1659,6 +1682,12 @@ export async function runMigrations() {
     })
     console.log('  ~ smtp_config.correos_admin')
   }
+
+  // Identidad global por documento: enlaza empleados.persona_id, añade
+  // fecha_nacimiento/es_independiente, UNIQUE(num_documento) y el índice
+  // único parcial (persona_id, empresa_activa_id) para el multi-empleo.
+  // Debe correr al final: requiere personas y empleados ya creadas.
+  await migrateIdentidades(db)
 
   console.log('Migraciones completadas.')
 }

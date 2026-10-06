@@ -100,6 +100,15 @@ export async function createRegistro(req, res) {
   const personaId = req.user.role === 'admin' ? req.body.persona_id : req.user.persona_id
   if (!empresaId && !personaId) return res.status(400).json({ error: 'empresa_id o persona_id requerido' })
 
+  // El empleado ligado al servicio debe pertenecer a la misma empresa
+  // (un empleado_id ajeno expondría identidad de otro tenant).
+  if (req.body.empleado_id && empresaId) {
+    const propietario = await db('empleados').where('id', req.body.empleado_id).first()
+    if (!propietario || propietario.empresa_id !== empresaId) {
+      return res.status(400).json({ error: 'El empleado no pertenece a la empresa del servicio' })
+    }
+  }
+
   const data = {
     empresa_id: empresaId || null,
     persona_id: personaId || null,
@@ -134,6 +143,12 @@ export async function updateRegistro(req, res) {
     if (req.body[campo] !== undefined) data[campo] = req.body[campo]
   }
   if (Object.keys(data).length === 0) return res.status(400).json({ error: 'Nada que actualizar' })
+  if (data.empleado_id && registro.empresa_id) {
+    const propietario = await db('empleados').where('id', data.empleado_id).first()
+    if (!propietario || propietario.empresa_id !== registro.empresa_id) {
+      return res.status(400).json({ error: 'El empleado no pertenece a la empresa del servicio' })
+    }
+  }
 
   const statusChanged = data.status !== undefined && Number(data.status) !== Number(registro.status)
   const paymentChanged = data.status_pago !== undefined && Number(data.status_pago) !== Number(registro.status_pago)

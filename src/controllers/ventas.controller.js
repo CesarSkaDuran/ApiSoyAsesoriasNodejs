@@ -221,6 +221,7 @@ export async function convertirLead(req, res) {
       email: lead.email,
       telefono: lead.telefono,
       status: 'activo',
+      es_independiente: true,
     })
     update.persona_id = personaId
   }

@@ -26,6 +26,14 @@ const db = knex({
     idleTimeoutMillis: 30_000,
     reapIntervalMillis: 1_000,
     createRetryIntervalMillis: 200,
+    // El servidor anterior de la app no tenía ONLY_FULL_GROUP_BY; las
+    // consultas con COUNT(*) + joins asumen ese comportamiento. Se ajusta
+    // por conexión para que WAMP (5.7) y MySQL 8 se comporten igual.
+    afterCreate(conn, done) {
+      conn.query("SET SESSION sql_mode = 'IGNORE_SPACE,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION'", (err) => {
+        done(err, conn)
+      })
+    },
   },
 })
 

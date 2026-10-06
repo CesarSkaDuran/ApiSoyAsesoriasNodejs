@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { api, loginAs, ADMIN, stopApp } from './helpers.js'
+import { api, loginAs, ADMIN, stopApp, ensurePersona } from './helpers.js'
 import db from '../src/db/knex.js'
 
 // Elegibilidad del salario integral (CST art. 132):
@@ -51,7 +51,8 @@ test('salario integral: validación en ficha, en liquidación y factor de empres
 
   // ── Factor al alza que invalida integrales → 409 + forzar ───────────────
   const [intId] = await db('empleados').insert({
-    empresa_id: empresaId, primer_nombre: 'TEST INT 40', numero_documento: doc(),
+    empresa_id: empresaId, persona_id: await ensurePersona(doc()),
+    primer_nombre: 'TEST INT 40', numero_documento: doc(),
     salario_base: Math.round(smmlv * 13.5), salario_integral: true,
     riesgo: 'I', status: 'activo', created_at: new Date(), updated_at: new Date(),
   })
@@ -71,7 +72,8 @@ test('salario integral: validación en ficha, en liquidación y factor de empres
 
   // ── Liquidación: integral bajo el piso → 400 estructurado ───────────────
   const [bajoId] = await db('empleados').insert({
-    empresa_id: empresaId, primer_nombre: 'TEST BAJO', numero_documento: doc(),
+    empresa_id: empresaId, persona_id: await ensurePersona(doc()),
+    primer_nombre: 'TEST BAJO', numero_documento: doc(),
     salario_base: await piso() - 100000, salario_integral: true,
     riesgo: 'I', status: 'activo', created_at: new Date(), updated_at: new Date(),
   })

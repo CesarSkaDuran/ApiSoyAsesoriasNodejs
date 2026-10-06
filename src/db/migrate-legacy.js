@@ -184,6 +184,7 @@ async function migratePersonas(userMap, afiliacionMap, cache) {
       imagen: p.imagen || null,
       status: p.status === 1 ? 'activo' : 'prospecto',
       observaciones: p.observaciones || null,
+      es_independiente: true,
       created_at: p.created_at || new Date(),
       updated_at: p.updated_at || new Date(),
     })

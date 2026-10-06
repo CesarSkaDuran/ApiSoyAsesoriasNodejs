@@ -280,7 +280,7 @@ export async function dashboard(req, res) {
       .orderBy('created_at', 'desc')
       .limit(5),
     // Independent count
-    db('personas').count('* as n').first(),
+    db('personas').where('es_independiente', true).count('* as n').first(),
   ])
 
   const statusLabels = { 1: 'Pendiente', 2: 'Finalizado', 3: 'Verificado', 4: 'En trámite' }
