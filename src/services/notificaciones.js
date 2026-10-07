@@ -173,6 +173,59 @@ export async function notificarCambioEstado({
   }
 }
 
+// Notifica al/los usuarios cliente de una entidad con mensaje libre
+// (ej. "te entregamos un documento corregido"). Misma regla que
+// notificarCambioEstado: in-app siempre, correo solo con consentimiento.
+export async function notificarCliente({
+  entidad,
+  entidadId = null,
+  titulo,
+  mensaje,
+  url = null,
+  empresaId = null,
+  personaId = null,
+  userId = null,
+  detalle = null,
+}) {
+  try {
+    const usuarios = await usuariosDestino({ empresaId, personaId, userId })
+    if (!usuarios.length) return
+
+    const rows = await createNotifications(db, usuarios.map(u => u.id), {
+      titulo, mensaje, tipo: entidad, url,
+    })
+    publishNotifications(rows)
+
+    if (esAuditoria(entidad)) return
+
+    for (const u of usuarios) {
+      if (!aceptoVigente(u)) {
+        await db('email_log').insert({
+          user_id: u.id,
+          destinatario: u.destinos.join(','),
+          entidad, entidad_id: entidadId,
+          asunto: `Soy Asesorías — ${titulo}`,
+          status: 'omitido',
+          detalle: u.terminos_aceptados_en
+            ? `sin re-aceptacion v${TERMINOS_VERSION} (tiene v${u.terminos_version})`
+            : 'sin aceptacion de terminos',
+        }).catch(() => {})
+        continue
+      }
+      await enviarCorreo({
+        to: u.destinos,
+        userId: u.id,
+        entidad, entidadId,
+        subject: `Soy Asesorías — ${titulo}`,
+        text: `${mensaje} Ingresa a la plataforma para más detalle.`,
+        html: plantillaCorreo({ titulo, mensaje, detalle, url, marca: marcaAdmin() }),
+      })
+    }
+  } catch (e) {
+    console.error('[notificaciones] error cliente:', e.message)
+  }
+}
+
 // Notifica al equipo interno (admins) por acciones del CLIENTE:
 // nueva solicitud, nuevo ticket, respuesta, documento cargado, etc.
 // El staff no requiere consentimiento — el correo va siempre.

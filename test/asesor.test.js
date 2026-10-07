@@ -60,7 +60,7 @@ test('asesor recibe 403 en modulos no habilitados', async () => {
   const { token } = await loginAs(ASESOR)
   const nominas = await api.get('/nominas', { token })
   assert.equal(nominas.status, 403)
-  assert.equal(nominas.data.error, 'Sin permiso para este modulo')
+  assert.equal(nominas.data.code, 'MODULO_NO_HABILITADO')
 
   const gastos = await api.get('/gastos', { token })
   assert.equal(gastos.status, 403)

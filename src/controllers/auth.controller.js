@@ -241,7 +241,8 @@ export async function createUser(req, res) {
     await db('user_modulos').insert({
       user_id: userId,
       home: true, empresas: true, documentos: true, empleados: true,
-      nominas: true, servicios: true, pagos: true, solicitudes: true,
+      nominas: true, planillas: true, servicios: true, pagos: true,
+      solicitudes: true, soportes: true, diagnosticos: true,
       ...(modulos || {}),
     })
   } else if (role === 'independiente' && persona_id) {
@@ -250,6 +251,7 @@ export async function createUser(req, res) {
       user_id: userId,
       home: true, documentos: true, pagos: true, planillas: true,
       servicios: true, independientes: true, solicitudes: true,
+      soportes: true, diagnosticos: true,
       ...(modulos || {}),
     })
   } else {

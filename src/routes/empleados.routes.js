@@ -1,10 +1,11 @@
 import { Router } from 'express'
 import { authMiddleware, requireRole, requireModulo, scopeEmpresa } from '../middlewares/auth.js'
+import { upload } from '../middlewares/upload.js'
 import {
   list as listEmpleados, show as showEmpleado, create as createEmpleado, contratar,
   update as updateEmpleado, remove as removeEmpleado, retirarLote, recontratar,
   addBeneficiario, removeBeneficiario,
-  addIncapacidad, updateIncapacidad, removeIncapacidad,
+  addIncapacidad, updateIncapacidad, removeIncapacidad, uploadFoto, getFoto,
 } from '../controllers/empleados.controller.js'
 
 const router = Router()
@@ -19,6 +20,8 @@ router.put('/:id', authMiddleware, requireModulo('empleados'), updateEmpleado)
 router.delete('/:id', authMiddleware, requireRole('admin', 'asesor'), requireModulo('empleados'), removeEmpleado)
 
 // subrecursos
+router.post('/:id/foto', authMiddleware, requireModulo('empleados'), upload.single('foto'), uploadFoto)
+router.get('/:id/foto', authMiddleware, requireModulo('empleados'), getFoto)
 router.post('/:id/beneficiarios', authMiddleware, requireModulo('empleados'), addBeneficiario)
 router.delete('/:id/beneficiarios/:bid', authMiddleware, requireModulo('empleados'), removeBeneficiario)
 router.post('/:id/incapacidades', authMiddleware, requireModulo('empleados'), addIncapacidad)

@@ -1683,12 +1683,184 @@ export async function runMigrations() {
     console.log('  ~ smtp_config.correos_admin')
   }
 
+  // Estados de revisión de documentos del diagnóstico, configurables:
+  // el admin decide cuáles aparecen y cuáles exigen motivo (caja de texto).
+  if (!await db.schema.hasTable('diagnostico_doc_estados')) {
+    await db.schema.createTable('diagnostico_doc_estados', t => {
+      t.increments('id')
+      t.string('value', 60).notNullable().unique()
+      t.string('label', 120).notNullable()
+      t.boolean('requiere_comentario').notNullable().defaultTo(false)
+      t.boolean('es_sistema').notNullable().defaultTo(false)
+      t.boolean('activo').notNullable().defaultTo(true)
+      t.integer('orden').notNullable().defaultTo(99)
+      t.timestamps(true, true)
+    })
+    await db('diagnostico_doc_estados').insert([
+      { value: 'pendiente', label: 'Pendiente', es_sistema: true, orden: 1 },
+      { value: 'revisar', label: 'En revisión', es_sistema: true, orden: 2 },
+      { value: 'aprobado', label: 'Aprobado', es_sistema: true, orden: 3 },
+      { value: 'rechazado', label: 'Rechazado', requiere_comentario: true, es_sistema: true, orden: 4 },
+      { value: 'renovar', label: 'Solicitar renovación', requiere_comentario: true, es_sistema: true, orden: 5 },
+    ])
+    console.log('  + diagnostico_doc_estados')
+  }
+  // La columna estado era ENUM de los 5 base: pasa a VARCHAR para
+  // soportar estados personalizados de diagnostico_doc_estados.
+  const [docEstadoCol] = await db.raw("SHOW COLUMNS FROM diagnostico_documentos LIKE 'estado'")
+  if (docEstadoCol[0] && docEstadoCol[0].Type.startsWith('enum')) {
+    await db.raw("ALTER TABLE diagnostico_documentos MODIFY COLUMN estado VARCHAR(60) NOT NULL DEFAULT 'pendiente'")
+    console.log('  ~ diagnostico_documentos.estado -> varchar')
+  }
+
+  // Multi-archivo por documento requerido del diagnóstico: el único
+  // UNIQUE(diagnostico_id, doc_config_id) se convierte en índice normal
+  // (el límite real lo aplica uploadDocumento con maximo_archivos).
+  const [ddIdx] = await db.raw("SHOW INDEX FROM diagnostico_documentos WHERE Key_name = 'diagnostico_documentos_diagnostico_id_doc_config_id_unique'")
+  if (ddIdx.length) {
+    await db.raw('ALTER TABLE diagnostico_documentos DROP INDEX diagnostico_documentos_diagnostico_id_doc_config_id_unique')
+    await db.raw('ALTER TABLE diagnostico_documentos ADD INDEX idx_dd_diag_config (diagnostico_id, doc_config_id)')
+    console.log('  ~ diagnostico_documentos multi-archivo')
+  }
+
+  // Documentos ENTREGABLES del diagnóstico: el staff sube las versiones
+  // corregidas/finales que el cliente solo descarga (dirección admin->cliente,
+  // inversa a diagnostico_documentos).
+  if (!await db.schema.hasTable('diagnostico_entregables')) {
+    await db.schema.createTable('diagnostico_entregables', t => {
+      t.increments('id')
+      t.integer('diagnostico_id').unsigned().notNullable()
+      t.string('titulo', 200).nullable()
+      t.string('ruta_archivo', 255).notNullable()
+      t.string('nombre_original', 255).nullable()
+      t.string('mime_type', 120).nullable()
+      t.integer('tamano_bytes').unsigned().nullable()
+      t.integer('subido_por').unsigned().nullable()
+      t.timestamps(true, true)
+      t.index(['diagnostico_id'])
+    })
+    console.log('  + diagnostico_entregables')
+  }
+
+  // Catálogo de documentos obligatorios por empresa (checklist del módulo
+  // de Documentos). Parametrizable como maestro; tipo_id enlaza con
+  // documento_tipos para saber qué upload cubre el requisito.
+  if (!await db.schema.hasTable('empresa_doc_requeridos')) {
+    await db.schema.createTable('empresa_doc_requeridos', t => {
+      t.increments('id')
+      t.string('nombre', 160).notNullable()
+      t.text('descripcion').nullable()
+      t.integer('tipo_id').unsigned().nullable()
+      t.boolean('es_obligatorio').notNullable().defaultTo(true)
+      t.boolean('activo').notNullable().defaultTo(true)
+      t.integer('orden').notNullable().defaultTo(99)
+      t.timestamps(true, true)
+    })
+    console.log('  + empresa_doc_requeridos')
+  }
+  {
+    // Idempotente por nombre (el seed puede correr en reinicios paralelos)
+    const existentes = new Set(
+      (await db('empresa_doc_requeridos').select('nombre')).map(r => r.nombre)
+    )
+    const seedDocs = [
+      ['Cámara de Comercio vigente', 'Certificado de existencia y representación legal (no mayor a 30 días).'],
+      ['RUT actualizado', 'Registro Único Tributario de la empresa.'],
+      ['Cédula del representante legal', 'Documento de identidad del representante legal, ambas caras.'],
+      ['Planilla PILA del último período', 'Planilla integrada de aportes del mes anterior.'],
+      ['Plantilla de nómina de empleados', 'Listado vigente de empleados con salarios.'],
+      ['Contratos laborales vigentes', 'Contratos de trabajo firmados o muestra representativa.'],
+      ['Reglamento interno de trabajo', 'Reglamento registrado ante el Ministerio (si aplica).'],
+      ['Soportes de afiliación EPS/ARL', 'Comprobantes de afiliación de la empresa.'],
+      ['Certificación bancaria', 'Certificación de la cuenta donde se pagan nóminas.'],
+      ['Matriz de riesgos laborales', 'Matriz de identificación y valoración de peligros (SG-SST).'],
+    ]
+    for (let i = 0; i < seedDocs.length; i++) {
+      const [nombre, descripcion] = seedDocs[i]
+      if (existentes.has(nombre)) continue
+      // enlazar o crear el tipo de documento para el match con uploads
+      let tipo = await db('documento_tipos').where('nombre', nombre).first()
+      if (!tipo) {
+        const [tid] = await db('documento_tipos').insert({ nombre, descripcion, orden: 90 + i, activo: true })
+        tipo = { id: tid }
+      }
+      await db('empresa_doc_requeridos').insert({ nombre, descripcion, tipo_id: tipo.id, orden: i + 1 })
+    }
+    console.log('  ~ empresa_doc_requeridos seed')
+  }
+
+  // Estado del diagnóstico como VARCHAR: el ENUM no permite 'suspendido'
+  // ni futuros estados del flujo (igual que diagnostico_documentos.estado).
+  {
+    const [col] = await db.raw("SHOW COLUMNS FROM diagnosticos LIKE 'estado'")
+    if (col[0] && col[0].Type.startsWith('enum')) {
+      await db.raw("ALTER TABLE diagnosticos MODIFY COLUMN estado VARCHAR(30) NOT NULL DEFAULT 'pendiente'")
+      console.log('  ~ diagnosticos.estado → VARCHAR(30)')
+    }
+  }
+
+  // Foto de perfil del empleado (archivo en storage privado, servido por
+  // endpoint autenticado GET /empleados/:id/foto)
+  if (!await db.schema.hasColumn('empleados', 'imagen')) {
+    await db.schema.table('empleados', t => t.string('imagen', 255).nullable())
+    console.log('  + empleados.imagen')
+  }
+
+  // Fin de contrato a término fijo + marca del aviso de 30 días ya enviado
+  if (!await db.schema.hasColumn('empleados', 'fecha_terminacion')) {
+    await db.schema.table('empleados', t => {
+      t.date('fecha_terminacion').nullable()
+      t.timestamp('aviso_terminacion_at').nullable()
+    })
+    console.log('  + empleados.fecha_terminacion / aviso_terminacion_at')
+  }
+
   // Rol 'asesor': staff interno multi-empresa limitado por user_modulos.
   // No tiene scope de cliente (empresa_id/persona_id) ni el bypass de admin.
   const [usersRoleCol] = await db.raw("SHOW COLUMNS FROM users LIKE 'role'")
   if (usersRoleCol[0] && !usersRoleCol[0].Type.includes('asesor')) {
     await db.raw("ALTER TABLE users MODIFY COLUMN role ENUM('admin','empresa','independiente','asesor') NULL DEFAULT 'empresa'")
     console.log('  ~ users.role +asesor')
+  }
+
+  // Registro de migraciones de datos de una sola corrida (baseline,
+  // backfills): a diferencia del resto del archivo (idempotente por
+  // esquema), estas mutan datos y no deben repetirse en cada arranque.
+  if (!await db.schema.hasTable('migraciones_log')) {
+    await db.schema.createTable('migraciones_log', t => {
+      t.string('nombre', 120).primary()
+      t.timestamp('aplicada_en').defaultTo(db.fn.now())
+    })
+    console.log('  + migraciones_log')
+  }
+
+  // Habilitacion de modulos para clientes: los checks de user_modulos
+  // ahora tambien gatean empresa/independiente. Baseline de una sola
+  // corrida: los clientes actuales quedan con todos los modulos de su
+  // rol habilitados (antes el check no se evaluaba); despues el admin
+  // desmarca lo que quiera y no se vuelve a tocar.
+  {
+    const ya = await db('migraciones_log').where('nombre', 'baseline_modulos_clientes').first()
+    if (!ya) {
+      const MODULOS_CLIENTE_EMPRESA = ['home','empresas','documentos','empleados',
+        'nominas','planillas','servicios','pagos','solicitudes','soportes','diagnosticos']
+      const MODULOS_CLIENTE_INDEP = ['home','documentos','empleados','nominas',
+        'planillas','servicios','pagos','solicitudes','soportes','diagnosticos','independientes']
+
+      const clientes = await db('users').whereIn('role', ['empresa', 'independiente']).select('id', 'role')
+      const existentes = new Set((await db('user_modulos').select('user_id')).map(r => r.user_id))
+      for (const u of clientes) {
+        const flags = u.role === 'empresa' ? MODULOS_CLIENTE_EMPRESA : MODULOS_CLIENTE_INDEP
+        const data = Object.fromEntries(flags.map(m => [m, true]))
+        if (existentes.has(u.id)) {
+          await db('user_modulos').where('user_id', u.id).update(data)
+        } else {
+          await db('user_modulos').insert({ user_id: u.id, ...data })
+        }
+      }
+      await db('migraciones_log').insert({ nombre: 'baseline_modulos_clientes' })
+      console.log(`  ~ baseline modulos clientes (${clientes.length})`)
+    }
   }
 
   // Identidad global por documento: enlaza empleados.persona_id, añade

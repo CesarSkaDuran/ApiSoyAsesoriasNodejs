@@ -35,7 +35,7 @@ test('recontratar conserva identidad, documentos y cada periodo anterior; solo a
   const [nominaId] = await db('nominas').insert({ empresa_id: 2, nombre_periodo: 'Vínculo anterior de prueba', status: 'liquidada' })
   nominas.push(nominaId)
   const [detalleId] = await db('nomina_detalles').insert({ nomina_id: nominaId, empleado_id: empleado.id, salario_base: salario, neto: salario })
-  const payload = { fecha_ingreso: '2020-07-01', tipo_contrato: 'fijo', salario_base: salario + 100000, periodo_pago: 'quincenal' }
+  const payload = { fecha_ingreso: '2020-07-01', tipo_contrato: 'fijo', fecha_terminacion: '2021-07-01', salario_base: salario + 100000, periodo_pago: 'quincenal' }
 
   const prohibido = await api.post(`/empleados/${empleado.id}/recontratar`, payload, { token: cliente.token })
   assert.equal(prohibido.status, 403)

@@ -60,13 +60,25 @@ export function esStaff(user) {
   return user.role === 'admin' || user.role === 'asesor'
 }
 
-// Gate por modulo para el rol 'asesor' (staff interno limitado por
-// user_modulos). admin pasa siempre; empresa/independiente no se filtran
-// aqui: su acceso lo determina el scope de tenant, no los checkboxes.
+// Gate por modulo segun user_modulos.
+//   admin     -> pasa siempre
+//   asesor    -> exige el checkbox (staff limitado)
+//   empresa / independiente -> si el admin definio checks para el usuario
+//   (fila en user_modulos), se respetan; si nunca se configuraron, el
+//   cliente conserva su acceso base por compatibilidad.
 export function requireModulo(modulo) {
   return (req, res, next) => {
-    if (req.user.role === 'asesor' && !req.user.modulos?.[modulo]) {
-      return res.status(403).json({ error: 'Sin permiso para este modulo' })
+    if (req.user.role === 'admin') return next()
+    const modulos = req.user.modulos || {}
+    const configurado = Object.keys(modulos).some(k => k !== 'id' && k !== 'user_id' && k !== 'created_at' && k !== 'updated_at')
+    if (req.user.role === 'asesor' || configurado) {
+      if (!modulos[modulo]) {
+        return res.status(403).json({
+          error: 'Este modulo no esta habilitado para tu cuenta. Debes solicitar el acceso al administrador.',
+          modulo,
+          code: 'MODULO_NO_HABILITADO',
+        })
+      }
     }
     next()
   }

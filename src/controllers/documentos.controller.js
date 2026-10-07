@@ -60,6 +60,56 @@ export async function listTipos(req, res) {
   res.json({ data: await q })
 }
 
+// GET /documentos/requeridos?empresa_id= | ?persona_id= — checklist de
+// documentos obligatorios (catalogo empresa_doc_requeridos, parametrizable
+// en Maestros). Cada item indica si el owner ya subio un documento del
+// tipo enlazado. Empresa/independiente: solo su propio checklist.
+export async function requeridos(req, res) {
+  let empresaId = null
+  let personaId = null
+  if (req.user.role === 'empresa') {
+    empresaId = req.user.empresa_id
+  } else if (req.user.role === 'independiente') {
+    personaId = req.user.persona_id
+  } else {
+    empresaId = req.query.empresa_id ? Number(req.query.empresa_id) : null
+    personaId = req.query.persona_id ? Number(req.query.persona_id) : null
+    if (empresaId && !canAccessEmpresa(req.user, empresaId)) {
+      return res.status(403).json({ error: 'Sin acceso a esta empresa' })
+    }
+  }
+
+  const items = await db('empresa_doc_requeridos as r')
+    .leftJoin('documento_tipos as t', 't.id', 'r.tipo_id')
+    .where('r.activo', true)
+    .select('r.*', 't.nombre as tipo_nombre')
+    .orderBy([{ column: 'r.orden' }, { column: 'r.id' }])
+
+  let docs = []
+  if (empresaId || personaId) {
+    docs = await db('documentos')
+      .where(empresaId ? { empresa_id: empresaId } : { persona_id: personaId })
+      .whereNotNull('tipo_id')
+      .orderBy('id', 'desc')
+  }
+  const byTipo = {}
+  for (const d of docs) if (!byTipo[d.tipo_id]) byTipo[d.tipo_id] = d
+
+  res.json({
+    data: items.map(r => {
+      const doc = byTipo[r.tipo_id]
+      return {
+        ...r,
+        cargado: !!doc,
+        documento_id: doc?.id ?? null,
+        documento_nombre: doc?.nombre ?? null,
+        documento_estatus: doc?.estatus ?? null,
+        fecha_carga: doc?.created_at ?? null,
+      }
+    }),
+  })
+}
+
 // POST /documentos - sube archivo al storage privado (auth requerido)
 export async function uploadDoc(req, res) {
   if (!req.file) return res.status(400).json({ error: 'Archivo requerido' })

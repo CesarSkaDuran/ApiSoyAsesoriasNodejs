@@ -1,6 +1,9 @@
 import db from '../db/knex.js'
 import { canAccessEmpresa, esStaff } from '../middlewares/auth.js'
 import { resolverIdentidad, personaPublica, normalizarDocumento, errorIdentidad } from '../services/personas-identidad.js'
+import { createReadStream, existsSync, unlinkSync } from 'fs'
+import { extname, resolve } from 'path'
+import { enviarCorreo, plantillaCorreo } from '../services/mailer.js'
 
 const CAMPOS = [
   'primer_nombre', 'segundo_nombre', 'primer_apellido', 'segundo_apellido',
@@ -12,7 +15,7 @@ const CAMPOS = [
   // Datos PILA (Res. 2388/2016) — solo alimentan el archivo plano
   'tipo_cotizante', 'subtipo_cotizante', 'tipo_trabajador', 'subtipo_trabajador',
   'salario_integral', 'extranjero_sin_pension', 'colombiano_exterior', 'salario_variable',
-  'salario_menor_motivo',
+  'salario_menor_motivo', 'fecha_terminacion',
 ]
 
 // SMMLV de la última vigencia configurada (para la regla de salario bajo mínimo)
@@ -171,6 +174,10 @@ async function contratarEnEmpresa(req, res, nuevoEndpoint) {
   }
   if (!await validarSalarioMinimo(res, data.salario_base, data.salario_menor_motivo)) return
   if (!await validarSalarioIntegral(res, empresaId, data.salario_integral, data.salario_base)) return
+  // Contrato a término fijo: la fecha de terminación dispara el aviso de 30 días
+  if (data.tipo_contrato === 'fijo' && fechaUtc(data.fecha_terminacion) === null) {
+    return res.status(400).json({ error: 'El contrato a término fijo requiere fecha de terminación' })
+  }
 
   let resultado
   for (let intento = 0; intento < 3; intento++) {
@@ -234,6 +241,19 @@ export async function update(req, res) {
   const integral = data.salario_integral ?? empleado.salario_integral
   if (!await validarSalarioIntegral(res, empleado.empresa_id, integral, salario)) return
 
+  // Término fijo exige fecha de terminación; al prorrogarla/cambiarla se
+  // reinicia el aviso de 30 días para volver a notificar.
+  const tipoResultante = data.tipo_contrato ?? empleado.tipo_contrato
+  if (tipoResultante === 'fijo') {
+    const fechaResultante = data.fecha_terminacion !== undefined ? data.fecha_terminacion : empleado.fecha_terminacion
+    if (fechaUtc(fechaResultante) === null) {
+      return res.status(400).json({ error: 'El contrato a término fijo requiere fecha de terminación' })
+    }
+  }
+  if (data.fecha_terminacion !== undefined && fechaUtc(data.fecha_terminacion) !== fechaUtc(empleado.fecha_terminacion)) {
+    data.aviso_terminacion_at = null
+  }
+
   await db('empleados').where('id', empleado.id).update(data)
   const actualizado = await db('empleados').where('id', empleado.id).first()
   res.json({ empleado: actualizado })
@@ -252,6 +272,9 @@ export async function recontratar(req, res) {
   }
   if (body.salario_menor_motivo !== undefined && typeof body.salario_menor_motivo !== 'string') {
     return res.status(400).json({ error: 'El motivo del salario debe ser un texto' })
+  }
+  if (body.tipo_contrato === 'fijo' && fechaUtc(body.fecha_terminacion) === null) {
+    return res.status(400).json({ error: 'El contrato a término fijo requiere fecha de terminación' })
   }
   const resultado = await db.transaction(async trx => {
     const empleado = await trx('empleados').where('id', req.params.id).forUpdate().first()
@@ -290,7 +313,10 @@ export async function recontratar(req, res) {
     await trx('empleados').where('id', empleado.id).update({
       status: 'activo', fecha_ingreso: body.fecha_ingreso, fecha_retiro: null,
       salario_base: salario, tipo_contrato: body.tipo_contrato, periodo_pago: periodoPago,
-      salario_integral: integral, salario_menor_motivo: motivo, updated_at: trx.fn.now(),
+      salario_integral: integral, salario_menor_motivo: motivo,
+      fecha_terminacion: body.tipo_contrato === 'fijo' ? (body.fecha_terminacion || null) : null,
+      aviso_terminacion_at: null,
+      updated_at: trx.fn.now(),
     })
     return {
       empleado: await trx('empleados').where('id', empleado.id).first(),
@@ -476,6 +502,83 @@ export async function addIncapacidad(req, res) {
 
   const [id] = await db('incapacidades').insert(data)
   res.status(201).json({ incapacidad: await db('incapacidades').where('id', id).first() })
+
+  // "¿Reportar al trabajador?" → correo al email del empleado (o de su
+  // persona vinculada por identidad global). Nunca bloquea el guardado.
+  if (req.body.notificar_trabajador) {
+    try {
+      let destino = empleado.email
+      if (!destino && empleado.persona_id) {
+        const p = await db('personas').where('id', empleado.persona_id).first('email')
+        destino = p?.email
+      }
+      if (!destino) {
+        await db('email_log').insert({
+          destinatario: '', entidad: 'incapacidad', entidad_id: id,
+          asunto: 'Incapacidad reportada', status: 'omitido',
+          detalle: `empleado ${empleado.id} sin email`,
+        }).catch(() => {})
+      } else {
+        const nombre = [empleado.primer_nombre, empleado.segundo_nombre, empleado.primer_apellido, empleado.segundo_apellido]
+          .filter(Boolean).join(' ')
+        const empresa = await db('empresas').where('id', empleado.empresa_id).first('razon_social')
+        const tipoLabel = { comun: 'Incapacidad común', laboral: 'Incapacidad laboral', maternidad: 'Licencia de maternidad', paternidad: 'Licencia de paternidad', no_remunerada: 'Licencia no remunerada', vacaciones: 'Vacaciones', otra: 'Otra novedad' }[data.tipo] || data.tipo
+        const fmt = (f) => String(f).slice(0, 10).split('-').reverse().join('/')
+        await enviarCorreo({
+          to: destino,
+          entidad: 'incapacidad', entidadId: id,
+          subject: `Soy Asesorías — ${tipoLabel} reportada`,
+          text: `${nombre}: se reportó una ${tipoLabel.toLowerCase()} del ${fmt(data.fecha_inicio)} al ${fmt(data.fecha_fin)} (${data.dias} día(s)).`,
+          html: plantillaCorreo({
+            titulo: `${tipoLabel} reportada`,
+            mensaje: `Hola <b>${nombre}</b>, se registró una novedad en tu cuenta${empresa ? ` de <b>${empresa.razon_social}</b>` : ''}.`,
+            detalle: `<b>Tipo:</b> ${tipoLabel}<br><b>Desde:</b> ${fmt(data.fecha_inicio)}<br><b>Hasta:</b> ${fmt(data.fecha_fin)}<br><b>Días:</b> ${data.dias}${data.numero_certificado ? `<br><b>Certificado N°:</b> ${data.numero_certificado}` : ''}`,
+            marca: { tipo: 'admin', nombre: 'Soy Asesorías', color: '#075cf5' },
+          }),
+        })
+      }
+    } catch (e) {
+      console.error('[incapacidades] notificación trabajador:', e.message)
+    }
+  }
+}
+
+// ── Foto de perfil ─────────────────────────────────────────────────────────
+
+const STORAGE_DIR = resolve(process.env.STORAGE_DIR || 'storage/documentos')
+const EXT_IMAGEN = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp'])
+
+// POST /empleados/:id/foto — imagen de perfil (storage privado)
+export async function uploadFoto(req, res) {
+  const empleado = await empleadoAcceso(req, res)
+  if (!empleado) return
+  if (!req.file) return res.status(400).json({ error: 'Archivo requerido' })
+
+  if (!EXT_IMAGEN.has(extname(req.file.originalname).toLowerCase())) {
+    unlinkSync(req.file.path)
+    return res.status(400).json({ error: 'Solo imágenes (jpg, png, gif, webp)' })
+  }
+
+  const anterior = empleado.imagen
+  await db('empleados').where('id', empleado.id).update({ imagen: req.file.filename })
+  if (anterior && anterior !== req.file.filename) {
+    unlinkSync(resolve(STORAGE_DIR, anterior))
+  }
+  res.json({ ok: true, imagen: req.file.filename })
+}
+
+// GET /empleados/:id/foto — sirve la imagen (autenticado)
+export async function getFoto(req, res) {
+  const empleado = await empleadoAcceso(req, res)
+  if (!empleado) return
+  const filePath = empleado.imagen ? resolve(STORAGE_DIR, empleado.imagen) : null
+  if (!filePath || !existsSync(filePath)) {
+    return res.status(404).json({ error: 'Sin foto' })
+  }
+  const mime = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp' }[extname(empleado.imagen).toLowerCase()] || 'application/octet-stream'
+  res.setHeader('Content-Type', mime)
+  res.setHeader('Cache-Control', 'private, max-age=300')
+  createReadStream(filePath).pipe(res)
 }
 
 // PUT /empleados/:id/incapacidades/:iid - admin o empresa: estado/datos

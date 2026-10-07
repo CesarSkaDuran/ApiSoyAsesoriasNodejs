@@ -147,6 +147,19 @@ const MAESTROS = {
     ],
     usadoEn: [{ table: 'documentos', col: 'tipo_id', label: 'documentos' }],
   },
+  empresa_doc_requeridos: {
+    label: 'Docs. obligatorios de empresa', icon: 'file-check',
+    singular: 'documento obligatorio',
+    fields: [
+      txt('nombre', 'Documento requerido', { required: true }),
+      area('descripcion', 'Descripción'),
+      sel('tipo_id', 'Tipo de documento (cubre el requisito)', 'documento_tipos'),
+      num('orden', 'Orden'),
+      bool('es_obligatorio', 'Obligatorio'),
+      bool('activo', 'Activo'),
+    ],
+    joins: [{ fk: 'tipo_id', table: 'documento_tipos', alias: 'tipo_nombre' }],
+  },
   sucursales: {
     label: 'Sucursales', icon: 'store',
     singular: 'sucursal',

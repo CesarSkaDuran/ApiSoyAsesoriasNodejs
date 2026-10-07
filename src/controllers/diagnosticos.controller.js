@@ -2,7 +2,7 @@ import db from '../db/knex.js'
 import { esStaff } from '../middlewares/auth.js'
 import { createReadStream, existsSync } from 'fs'
 import { resolve } from 'path'
-import { notificarAdmins, notificarCambioEstado } from '../services/notificaciones.js'
+import { notificarAdmins, notificarCambioEstado, notificarCliente } from '../services/notificaciones.js'
 
 // ════════════════════════════════════════════════════════════════════════════
 // DIAGNÓSTICOS — entrevista + documentos requeridos + informe
@@ -10,8 +10,18 @@ import { notificarAdmins, notificarCambioEstado } from '../services/notificacion
 // empresa/independiente: solo sus propios diagnósticos.
 // ════════════════════════════════════════════════════════════════════════════
 
-const ESTADOS = ['pendiente', 'en_progreso', 'logrado', 'cancelado']
+const ESTADOS = ['pendiente', 'en_progreso', 'logrado', 'suspendido', 'cancelado']
+// Fallback si la tabla de estados aún no se ha migrado
 const DOC_ESTADOS = ['pendiente', 'revisar', 'aprobado', 'rechazado', 'renovar']
+
+async function docEstadosActivos() {
+  try {
+    const rows = await db('diagnostico_doc_estados').where('activo', true).orderBy('orden')
+    return rows.length ? rows : DOC_ESTADOS.map(v => ({ value: v, requiere_comentario: 0 }))
+  } catch {
+    return DOC_ESTADOS.map(v => ({ value: v, requiere_comentario: 0 }))
+  }
+}
 const TIPOS_RESPUESTA = ['texto', 'textarea', 'numero', 'fecha', 'opciones', 'multiple', 'booleano', 'cumplimiento']
 
 const STORAGE_DIR = resolve(process.env.STORAGE_DIR || 'storage/documentos')
@@ -124,7 +134,7 @@ export async function show(req, res) {
   const [{ docs_total }] = await db('diagnostico_doc_config').where('activo', true).count('* as docs_total')
   const [{ docs_cargados }] = await db('diagnostico_documentos')
     .where('diagnostico_id', d.id).whereNotNull('ruta_archivo')
-    .count('* as docs_cargados')
+    .countDistinct('doc_config_id as docs_cargados')
 
   res.json({
     ...d,
@@ -200,12 +210,10 @@ export async function updateEstado(req, res) {
   }
 }
 
-// DELETE /diagnosticos/:id
+// DELETE /diagnosticos/:id — no se eliminan diagnósticos: se suspenden
+// para conservar el registro histórico (entrevista, documentos, informe).
 export async function remove(req, res) {
-  const d = await findDiagnostico(req, res)
-  if (!d) return
-  await db('diagnosticos').where('id', d.id).del()
-  res.json({ ok: true })
+  res.status(400).json({ message: 'Los diagnósticos no se eliminan. Suspende el diagnóstico para conservar el registro.' })
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -271,6 +279,38 @@ export async function saveRespuestas(req, res) {
   }
 }
 
+// GET /diagnosticos/:id/entrevista/export — CSV de preguntas/respuestas
+// para análisis (solo staff).
+export async function exportEntrevista(req, res) {
+  const d = await findDiagnostico(req, res)
+  if (!d) return
+  if (!esStaff(req.user)) return res.status(403).json({ message: 'Solo el equipo interno puede exportar' })
+
+  const preguntas = await db('diagnostico_preguntas').where('activo', true).orderBy('orden')
+  const respuestas = await db('diagnostico_respuestas').where('diagnostico_id', d.id)
+  const map = Object.fromEntries(respuestas.map(r => [r.pregunta_id, r]))
+
+  const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
+  const filas = [['N°', 'Pregunta', 'Tipo', 'Obligatoria', 'Respuesta', 'Fecha'].join(';')]
+  preguntas.forEach((p, i) => {
+    const r = map[p.id]
+    const valor = r?.valor ?? (r?.valor_json ? JSON.parse(r.valor_json) : '')
+    filas.push([
+      i + 1,
+      esc(p.titulo),
+      esc(p.tipo_respuesta),
+      p.es_obligatoria ? 'Sí' : 'No',
+      esc(Array.isArray(valor) ? valor.join(', ') : valor),
+      esc(r?.updated_at ? new Date(r.updated_at).toLocaleString('es-CO') : ''),
+    ].join(';'))
+  })
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+  res.setHeader('Content-Disposition', `attachment; filename="entrevista-diagnostico-${d.id}.csv"`)
+  // BOM para que Excel abra los acentos bien
+  res.send('\uFEFF' + filas.join('\r\n'))
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // DOCUMENTOS REQUERIDOS
 // ════════════════════════════════════════════════════════════════════════════
@@ -285,17 +325,19 @@ export async function documentos(req, res) {
     .leftJoin('users as u', 'u.id', 'doc.revisado_por')
     .where('doc.diagnostico_id', d.id)
     .select('doc.*', 'u.name as revisado_por_nombre')
-  const map = Object.fromEntries(docs.map(x => [x.doc_config_id, x]))
+    .orderBy('doc.id')
 
   res.json({
     documentos: configs.map(c => ({
       config: c,
-      documento: map[c.id] || null,
+      archivos: docs.filter(x => x.doc_config_id === c.id),
     })),
   })
 }
 
 // POST /diagnosticos/:id/documentos/:configId — subir archivo
+// Multi-archivo: hasta maximo_archivos de la config (tope global 5).
+const MAX_ARCHIVOS = 5
 export async function uploadDocumento(req, res) {
   const d = await findDiagnostico(req, res)
   if (!d) return
@@ -303,6 +345,14 @@ export async function uploadDocumento(req, res) {
 
   const config = await db('diagnostico_doc_config').where('id', req.params.configId).where('activo', true).first()
   if (!config) return res.status(404).json({ message: 'Documento no configurado' })
+
+  const max = Math.min(Math.max(Number(config.maximo_archivos) || MAX_ARCHIVOS, 1), MAX_ARCHIVOS)
+  const [{ total }] = await db('diagnostico_documentos')
+    .where({ diagnostico_id: d.id, doc_config_id: config.id })
+    .count('* as total')
+  if (Number(total) >= max) {
+    return res.status(422).json({ message: `Máximo ${max} archivo(s) por documento. Elimina uno para cargar otro.` })
+  }
 
   // Validar extensión contra la config
   if (config.tipo_archivo) {
@@ -324,15 +374,15 @@ export async function uploadDocumento(req, res) {
     estado: esStaff(req.user) ? (req.body.estado || 'revisar') : 'revisar',
     comentarios_revision: req.body.comentarios || null,
   }
-  if (esStaff(req.user) && DOC_ESTADOS.includes(req.body.estado)) {
-    payload.fecha_revision = db.fn.now()
-    payload.revisado_por = req.user.id
+  if (esStaff(req.user)) {
+    const activos = await docEstadosActivos()
+    if (activos.some(e => e.value === req.body.estado)) {
+      payload.fecha_revision = db.fn.now()
+      payload.revisado_por = req.user.id
+    }
   }
 
-  await db('diagnostico_documentos')
-    .insert(payload)
-    .onConflict(['diagnostico_id', 'doc_config_id'])
-    .merge()
+  await db('diagnostico_documentos').insert(payload)
 
   res.status(201).json({ ok: true })
 
@@ -356,7 +406,12 @@ export async function revisarDocumento(req, res) {
   if (!puedeVer(req.user, d)) return res.status(403).json({ message: 'Sin acceso' })
 
   const estado = req.body.estado
-  if (estado && !DOC_ESTADOS.includes(estado)) return res.status(400).json({ message: 'Estado no válido' })
+  const activos = await docEstadosActivos()
+  const estadoCfg = activos.find(e => e.value === estado)
+  if (estado && !estadoCfg) return res.status(400).json({ message: 'Estado no válido' })
+  if (estadoCfg?.requiere_comentario && !(req.body.comentarios || '').trim()) {
+    return res.status(400).json({ message: `Indica el motivo de "${estadoCfg.label}"` })
+  }
 
   await db('diagnostico_documentos').where('id', doc.id).update({
     estado: estado || doc.estado,
@@ -364,6 +419,33 @@ export async function revisarDocumento(req, res) {
     fecha_revision: db.fn.now(),
     revisado_por: req.user.id,
   })
+  res.json({ ok: true })
+
+  // Staff revisa un documento requerido -> avisar al cliente (in-app + correo)
+  if (estado && estado !== doc.estado) {
+    const config = await db('diagnostico_doc_config').where('id', doc.doc_config_id).first()
+    notificarCambioEstado({
+      entidad: 'diagnostico', entidadId: d.id,
+      titulo: `Documento "${config?.titulo || 'requerido'}"${doc.nombre_original ? ` (${doc.nombre_original})` : ''} del diagnóstico "${d.nombre}"`,
+      estadoAnterior: doc.estado, estadoNuevo: estado,
+      url: '/admin/diagnosticos',
+      empresaId: d.empresa_id, personaId: d.persona_id,
+    })
+  }
+}
+
+// DELETE /diagnosticos/documentos/:docId — quitar un archivo cargado
+export async function removeDocumento(req, res) {
+  const doc = await db('diagnostico_documentos').where('id', req.params.docId).first()
+  if (!doc) return res.status(404).json({ message: 'Documento no encontrado' })
+  const d = await db('diagnosticos').where('id', doc.diagnostico_id).first()
+  if (!puedeVer(req.user, d)) return res.status(403).json({ message: 'Sin acceso' })
+
+  if (doc.ruta_archivo) {
+    const { unlink } = await import('fs/promises')
+    await unlink(resolve(STORAGE_DIR, doc.ruta_archivo)).catch(() => {})
+  }
+  await db('diagnostico_documentos').where('id', doc.id).del()
   res.json({ ok: true })
 }
 
@@ -384,6 +466,90 @@ export async function downloadDocumento(req, res) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// ENTREGABLES — documentos corregidos/finales que el staff publica para
+// que el cliente los descargue (dirección inversa a los requeridos).
+// ════════════════════════════════════════════════════════════════════════════
+
+async function findEntregable(req, res) {
+  const e = await db('diagnostico_entregables').where('id', req.params.eid).first()
+  if (!e) {
+    res.status(404).json({ message: 'Entregable no encontrado' })
+    return null
+  }
+  const d = await db('diagnosticos').where('id', e.diagnostico_id).first()
+  if (!puedeVer(req.user, d)) {
+    res.status(403).json({ message: 'Sin acceso' })
+    return null
+  }
+  return { entregable: e, diagnostico: d }
+}
+
+// GET /diagnosticos/:id/entregables
+export async function listEntregables(req, res) {
+  const d = await findDiagnostico(req, res)
+  if (!d) return
+  const rows = await db('diagnostico_entregables as e')
+    .leftJoin('users as u', 'u.id', 'e.subido_por')
+    .where('e.diagnostico_id', d.id)
+    .select('e.*', 'u.name as subido_por_nombre')
+    .orderBy('e.id', 'desc')
+  res.json({ data: rows })
+}
+
+// POST /diagnosticos/:id/entregables — solo staff
+export async function uploadEntregable(req, res) {
+  const d = await findDiagnostico(req, res)
+  if (!d) return
+  if (!req.file) return res.status(400).json({ message: 'Archivo requerido' })
+
+  const [id] = await db('diagnostico_entregables').insert({
+    diagnostico_id: d.id,
+    titulo: (req.body.titulo || '').trim() || req.file.originalname,
+    ruta_archivo: req.file.filename,
+    nombre_original: req.file.originalname,
+    mime_type: req.file.mimetype,
+    tamano_bytes: req.file.size,
+    subido_por: req.user.id,
+  })
+  res.status(201).json({ id })
+
+  notificarCliente({
+    entidad: 'diagnostico', entidadId: d.id,
+    titulo: `Documento entregado — diagnóstico "${d.nombre}"`,
+    mensaje: `El equipo te entregó "${req.body.titulo || req.file.originalname}". Ya puedes descargarlo.`,
+    url: '/admin/diagnosticos',
+    empresaId: d.empresa_id, personaId: d.persona_id,
+  })
+}
+
+// GET /diagnosticos/entregables/:eid/download
+export async function downloadEntregable(req, res) {
+  const found = await findEntregable(req, res)
+  if (!found) return
+  const { entregable } = found
+  const filePath = resolve(STORAGE_DIR, entregable.ruta_archivo)
+  if (!entregable.ruta_archivo || !existsSync(filePath)) {
+    return res.status(404).json({ message: 'Archivo no disponible' })
+  }
+  res.setHeader('Content-Type', entregable.mime_type || 'application/octet-stream')
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(entregable.nombre_original || 'documento')}"`)
+  createReadStream(filePath).pipe(res)
+}
+
+// DELETE /diagnosticos/entregables/:eid — solo staff
+export async function removeEntregable(req, res) {
+  const found = await findEntregable(req, res)
+  if (!found) return
+  const { entregable } = found
+  if (entregable.ruta_archivo) {
+    const { unlink } = await import('fs/promises')
+    await unlink(resolve(STORAGE_DIR, entregable.ruta_archivo)).catch(() => {})
+  }
+  await db('diagnostico_entregables').where('id', entregable.id).del()
+  res.json({ ok: true })
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // INFORME
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -401,6 +567,59 @@ export async function saveInforme(req, res) {
     .insert({ diagnostico_id: d.id, contenido_html: req.body.contenido_html || '' })
     .onConflict('diagnostico_id')
     .merge()
+  res.json({ ok: true })
+}
+
+// GET /diagnosticos/doc-estados — estados activos para la revisión
+export async function listDocEstados(req, res) {
+  res.json({ data: await docEstadosActivos() })
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// CONFIGURACIÓN (admin): preguntas y documentos requeridos
+// ════════════════════════════════════════════════════════════════════════════
+
+export async function listDocEstadosAll(req, res) {
+  res.json({ data: await db('diagnostico_doc_estados').orderBy('orden') })
+}
+
+const slugify = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60)
+
+export async function createDocEstado(req, res) {
+  const { value, label, requiere_comentario, orden } = req.body
+  if (!label?.trim()) return res.status(400).json({ message: 'El nombre del estado es obligatorio' })
+  const val = (value || slugify(label)).trim()
+  if (!val) return res.status(400).json({ message: 'Identificador inválido' })
+  const existe = await db('diagnostico_doc_estados').where('value', val).first()
+  if (existe) return res.status(409).json({ message: 'Ya existe un estado con ese identificador' })
+  const [id] = await db('diagnostico_doc_estados').insert({
+    value: val, label: label.trim(),
+    requiere_comentario: !!requiere_comentario,
+    orden: Number(orden) || 99, activo: true, es_sistema: false,
+  })
+  res.status(201).json({ id })
+}
+
+export async function updateDocEstado(req, res) {
+  const e = await db('diagnostico_doc_estados').where('id', req.params.id).first()
+  if (!e) return res.status(404).json({ message: 'Estado no encontrado' })
+  const { label, requiere_comentario, activo, orden } = req.body
+  await db('diagnostico_doc_estados').where('id', e.id).update({
+    label: label ?? e.label,
+    requiere_comentario: requiere_comentario !== undefined ? !!requiere_comentario : e.requiere_comentario,
+    activo: activo !== undefined ? !!activo : e.activo,
+    orden: orden !== undefined ? Number(orden) : e.orden,
+  })
+  res.json({ ok: true })
+}
+
+export async function deleteDocEstado(req, res) {
+  const e = await db('diagnostico_doc_estados').where('id', req.params.id).first()
+  if (!e) return res.status(404).json({ message: 'Estado no encontrado' })
+  // Los de sistema sostienen el flujo (pendiente/revisar/aprobado/rechazado/renovar):
+  // se pueden desactivar, no borrar. Los personalizados sí se eliminan.
+  if (e.es_sistema) return res.status(400).json({ message: 'Los estados base no se pueden eliminar; desactívalo si no lo quieres ofrecer' })
+  await db('diagnostico_doc_estados').where('id', e.id).del()
   res.json({ ok: true })
 }
 
