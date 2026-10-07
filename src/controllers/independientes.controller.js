@@ -27,6 +27,7 @@ const CAMPOS = [
   'primer_nombre', 'segundo_nombre', 'primer_apellido', 'segundo_apellido',
   'tipo_documento', 'num_documento', 'direccion', 'telefono', 'email',
   'departamento_id', 'ciudad_id', 'tipo_afiliacion', 'observaciones', 'status',
+  'salario_base', 'ingresos_adicionales',
 ]
 
 // GET /personas?search=&status=&page=&per_page=  (admin)

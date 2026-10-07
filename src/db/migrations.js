@@ -782,16 +782,52 @@ export async function runMigrations() {
   if (!await db.schema.hasTable('planillas')) {
     await createTable('planillas', t => {
       t.increments('id')
-      t.integer('empresa_id').unsigned().references('id').inTable('empresas').notNullable().index()
+      t.integer('empresa_id').unsigned().references('id').inTable('empresas').nullable().index()
+      t.integer('persona_id').unsigned().references('id').inTable('personas').onDelete('CASCADE').nullable().index()
       t.integer('nomina_id').unsigned().references('id').inTable('nominas').onDelete('SET NULL').nullable()
       t.string('numero_planilla', 100).nullable()
       t.string('periodo', 20).nullable()
+      t.decimal('ingreso_mensual', 15, 2).nullable()
+      t.decimal('ingreso_adicional', 15, 2).nullable()
+      t.decimal('ingreso_total', 15, 2).nullable()
       t.decimal('valor_total', 15, 2).defaultTo(0)
       t.date('fecha_pago').nullable()
-      t.enum('status', ['generada', 'pagada', 'verificada']).defaultTo('generada')
+      t.enum('status', ['solicitada', 'generada', 'pagada', 'verificada']).defaultTo('generada')
+      t.unique(['persona_id', 'periodo'], 'planillas_persona_periodo_unique')
       t.timestamps(true, true)
     })
     console.log('  + planillas')
+  } else {
+    const [empresaIdCol] = await db.raw("SHOW COLUMNS FROM planillas LIKE 'empresa_id'")
+    if (empresaIdCol[0]?.Null === 'NO') {
+      await db.raw('ALTER TABLE planillas MODIFY empresa_id INT UNSIGNED NULL')
+      console.log('  ~ planillas.empresa_id nullable')
+    }
+    if (!await db.schema.hasColumn('planillas', 'persona_id')) {
+      await db.schema.alterTable('planillas', t => {
+        t.integer('persona_id').unsigned().nullable().index()
+        t.foreign('persona_id', 'planillas_persona_id_fk').references('id').inTable('personas').onDelete('CASCADE')
+      })
+      console.log('  + planillas.persona_id')
+    }
+    for (const col of ['ingreso_mensual', 'ingreso_adicional', 'ingreso_total']) {
+      if (!await db.schema.hasColumn('planillas', col)) {
+        await db.schema.alterTable('planillas', t => { t.decimal(col, 15, 2).nullable() })
+        console.log(`  + planillas.${col}`)
+      }
+    }
+    const [indicesPlanillas] = await db.raw('SHOW INDEX FROM planillas')
+    if (!indicesPlanillas.some(i => i.Key_name === 'planillas_persona_periodo_unique')) {
+      await db.schema.alterTable('planillas', t => {
+        t.unique(['persona_id', 'periodo'], 'planillas_persona_periodo_unique')
+      })
+      console.log('  + planillas persona/periodo unique')
+    }
+    const [statusCol] = await db.raw("SHOW COLUMNS FROM planillas LIKE 'status'")
+    if (statusCol[0]?.Type && !statusCol[0].Type.includes("'solicitada'")) {
+      await db.raw("ALTER TABLE planillas MODIFY status ENUM('solicitada','generada','pagada','verificada') NOT NULL DEFAULT 'generada'")
+      console.log('  ~ planillas.status +solicitada')
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -1860,6 +1896,15 @@ export async function runMigrations() {
       }
       await db('migraciones_log').insert({ nombre: 'baseline_modulos_clientes' })
       console.log(`  ~ baseline modulos clientes (${clientes.length})`)
+    }
+  }
+
+  // Independientes: salario base e ingresos adicionales propios. Con ese
+  // salario se liquida su planilla de seguridad social (no tienen empleados).
+  for (const col of ['salario_base', 'ingresos_adicionales']) {
+    if (!await db.schema.hasColumn('personas', col)) {
+      await db.schema.alterTable('personas', t => { t.decimal(col, 15, 2).nullable() })
+      console.log(`  + personas.${col}`)
     }
   }
 
