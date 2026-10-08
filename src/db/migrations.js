@@ -1,5 +1,6 @@
 import db from './knex.js'
 import { NOMINA_PARAMETER_DEFAULTS, NOMINA_JSON_FIELDS } from '../nomina-parameters.js'
+import { festivosDelAnio } from '../festivos.js'
 import { migrateIdentidades } from './migrate-identidades.js'
 
 // Schema nuevo para SoyAsesorias.
@@ -605,6 +606,38 @@ export async function runMigrations() {
     .where('vigencia', 2026)
     .where('fuente_normativa', 'Decretos 0159 y 1470 de 2026; Resolución DIAN 000238 de 2025; tasas SGSS vigentes 2026.')
     .update({ fuente_normativa: NOMINA_PARAMETER_DEFAULTS[2026].fuente_normativa })
+
+  // Festivos nacionales (días no laborables): fecha fija, Ley Emiliani y
+  // dependientes de la Pascua. Se siembran por adelantado (año actual -2
+  // hasta +3) y solo se insertan las fechas faltantes: las filas editadas
+  // a mano (p. ej. festivos regionales) se conservan.
+  if (!await db.schema.hasTable('festivos')) {
+    await createTable('festivos', t => {
+      t.increments('id')
+      t.date('fecha').notNullable().unique()
+      t.string('nombre', 120).notNullable()
+      t.timestamps(true, true)
+    })
+    console.log('  + festivos')
+  }
+  {
+    const anioActual = new Date().getFullYear()
+    const existentes = new Set(
+      (await db('festivos').select(db.raw("DATE_FORMAT(fecha, '%Y-%m-%d') as fecha"))).map(r => r.fecha)
+    )
+    const faltantes = []
+    for (let a = anioActual - 2; a <= anioActual + 3; a++) {
+      for (const f of festivosDelAnio(a)) {
+        if (!existentes.has(f.fecha)) {
+          faltantes.push({ ...f, created_at: new Date(), updated_at: new Date() })
+        }
+      }
+    }
+    if (faltantes.length) {
+      await db('festivos').insert(faltantes)
+      console.log(`  ~ festivos: ${faltantes.length} fechas sembradas`)
+    }
+  }
 
   if (!await db.schema.hasTable('horas_extras')) {
     await createTable('horas_extras', t => {

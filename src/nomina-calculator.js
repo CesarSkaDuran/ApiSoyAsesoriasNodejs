@@ -1,3 +1,5 @@
+import { noLaboralInfo } from './festivos.js'
+
 const round2 = value => Math.round((Number(value) + Number.EPSILON) * 100) / 100
 const amount = value => Math.max(0, Number(value) || 0)
 const pct = (value, base) => base * (Number(value) || 0) / 100
@@ -12,7 +14,7 @@ const toJson = (value, fallback) => {
 
 // Resuelve el valor vigente de una lista de cortes [{desde: 'AAAA-MM-DD', ...}]
 // para una fecha dada. Sin fecha toma el último corte.
-function corteVigente(cortes, key, fecha) {
+export function corteVigente(cortes, key, fecha) {
   const list = toJson(cortes, [])
     .filter(c => c && c.desde && c[key] !== undefined && c[key] !== null)
     .sort((a, b) => String(a.desde).localeCompare(String(b.desde)))
@@ -40,6 +42,10 @@ export function fondoSolidaridadPct(ibc, params) {
 const HORAS_EXTRA_TIPOS = new Set(['diurna', 'nocturna', 'extra_diurna_dominical', 'extra_nocturna_dominical'])
 
 export function calcularHorasRecargos(horas, salarioMensual, params, fechaReferencia) {
+  // params.festivos: objeto { 'AAAA-MM-DD': nombre } adjuntado por el
+  // controlador con los festivos del período; sirve para marcar las filas
+  // que caen en domingo o festivo nacional.
+  const festivosMap = new Map(Object.entries(params?.festivos || {}))
   const detalle = []
   let valor = 0
   let horasExtra = 0
@@ -48,6 +54,7 @@ export function calcularHorasRecargos(horas, salarioMensual, params, fechaRefere
     const tipo = String(item.tipo || 'diurna')
     if (!cantidad) continue
     const fecha = item.fecha ? String(item.fecha).slice(0, 10) : fechaReferencia
+    const diaInfo = noLaboralInfo(fecha, festivosMap)
     const jornada = corteVigente(params.jornada_cortes, 'horas_semanales', fecha) ?? 48
     const dominical = corteVigente(params.dominical_cortes, 'pct', fecha) ?? 75
     const valorHora = salarioMensual / (jornada * 5)
@@ -77,6 +84,8 @@ export function calcularHorasRecargos(horas, salarioMensual, params, fechaRefere
       valor_hora: round2(valorHora),
       factor_pct: round2(factor * 100),
       valor: round2(subtotal),
+      es_no_laboral: diaInfo.es_no_laboral,
+      motivo_dia: diaInfo.motivo,
     })
   }
   return { valor, horasExtra, detalle }
@@ -227,6 +236,15 @@ export function liquidarEmpleado(empleado, input = {}, params, aplicaExoneracion
   const horasCalc = calcularHorasRecargos(input.horas, salarioMensual, params, fechaRef)
   const horasManual = amount(input.horas_extras)
   const horas = horasCalc.valor + horasManual
+  // Hora de tipo ordinario registrada en domingo/festivo: casi siempre es
+  // una tipificación errada (corresponde recargo dominical/festivo o extra
+  // en día de descanso). Alerta visible, no bloqueo: hay jornadas válidas.
+  for (const d of horasCalc.detalle) {
+    if (d.error || !d.es_no_laboral) continue
+    if (['diurna', 'nocturna', 'recargo_nocturno'].includes(d.tipo)) {
+      alertas.push(`Hora "${d.tipo}" registrada en día no laboral ${d.fecha} (${d.motivo_dia}): verifica el tipo de recargo`)
+    }
+  }
   // Tope de trabajo suplementario: 2h por día y 12h por semana (CST art. 167 /
   // Ley 2466 de 2025 art. 22). Se valida por fecha real de cada fila, no solo
   // por agregado del período; el exceso requiere autorización del Ministerio
