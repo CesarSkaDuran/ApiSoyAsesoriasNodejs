@@ -56,7 +56,7 @@
 
 ## Swagger / OpenAPI
 
-- Interfaz: `/api-docs`; especificación JSON: `/api-docs.json`.
+- Interfaz: `/swagger`; especificación JSON: `/swagger.json`.
 - La definición está en `src/docs/openapi.js`; al agregar o cambiar rutas,
   actualizar también su inventario OpenAPI.
 - Endpoints protegidos documentan Bearer JWT; captación de leads usa
@@ -64,3 +64,57 @@
 - `SWAGGER_ENABLED=false` desactiva la documentación.
 - Mantener `src/index.js` sin top-level await: el cargador Passenger/LiteSpeed
   requiere la entrada y no soporta módulos ESM con top-level await.
+
+## Despliegue en cPanel / Passenger (producción)
+
+- URL pública: `https://conexion.soyasesorias.co`
+- Raíz de la app (código fuente): `/home/soyaseso/soyasesorias-api-app`
+- Document root del dominio: `/home/soyaseso/conexion.soyasesorias.co`
+  (solo contiene el `.htaccess` de Passenger; no subir código ahí)
+- Node: `/home/soyaseso/nodevenv/soyasesorias-api-app/20/bin/node`
+- Startup file: `src/index.js` — Passenger lo arranca; **nunca** correr
+  `node src/index.js` manual como proceso de producción.
+- Al desplegar: subir solo código fuente. No tocar `.env`, `storage/`,
+  `uploads/` ni los `.htaccess` generados por CloudLinux.
+
+### Síntoma: rutas nuevas responden `Cannot GET` en producción
+
+Si el código en disco tiene la ruta pero el dominio responde `Cannot GET`
+(404 de Express, no de LiteSpeed), el worker `lsnode` está corriendo una
+versión vieja en memoria. **Comprobado oct-2026**: `cloudlinux-selector
+stop`/`restart` pueden reportar `success` sin matar los workers.
+
+Diagnóstico:
+
+```bash
+source /home/soyaseso/nodevenv/soyasesorias-api-app/20/bin/activate
+cd /home/soyaseso/soyasesorias-api-app
+
+# Comparar fecha de arranque de los workers vs fecha de los archivos
+ps -ef | grep -i node | grep -v grep        # lsnode:... + fecha de inicio
+stat -c '%y %n' src/app.js src/routes/<archivo-cambiado>.js
+date
+```
+
+Si los procesos `lsnode` arrancaron antes del mtime de los archivos, son
+workers zombies sirviendo código viejo. Solución:
+
+```bash
+kill <PID> [<PID>...]     # o kill -9 si no mueren
+sleep 2
+ps -ef | grep -i node | grep -v grep        # deben desaparecer
+```
+
+Passenger levanta un worker nuevo con el código actual en la próxima
+petición. Verificación esperada sin autenticación:
+
+```bash
+curl -i https://conexion.soyasesorias.co/health                          # 200
+curl -i https://conexion.soyasesorias.co/swagger.json                    # 200
+curl -i https://conexion.soyasesorias.co/api/diagnosticos                # 401 (existe)
+```
+
+Otras causas si el 404 es de **LiteSpeed** (no de Express): falta o está
+vacío `/home/soyaseso/conexion.soyasesorias.co/.htaccess` — crearlo con
+`touch` y reintentar `cloudlinux-selector restart --json --interpreter
+nodejs --app-root 'soyasesorias-api-app'`.
