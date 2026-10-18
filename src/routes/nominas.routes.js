@@ -5,6 +5,7 @@ import {
   liquidar as liquidarNomina, generarPlanilla, remove as removeNomina,
   getParametros, updateParametros, novedades as novedadesNomina,
   listConceptos, createConcepto, updateConcepto, pilaEstado, plano,
+  normativa, listFestivos, valorHora,
 } from '../controllers/nominas.controller.js'
 
 const router = Router()
@@ -17,6 +18,11 @@ router.get('/conceptos', authMiddleware, requireModulo('nominas'), listConceptos
 router.post('/conceptos', authMiddleware, requireRole('admin'), createConcepto)
 router.put('/conceptos/:id', authMiddleware, requireRole('admin'), updateConcepto)
 router.get('/pila-estado', authMiddleware, requireRole('admin', 'asesor'), requireModulo('nominas'), pilaEstado)
+// Consulta normativa: valores vigentes, festivos y calculadora de hora.
+// Son datos públicos de ley; los lee cualquier usuario con módulo nóminas.
+router.get('/normativa', authMiddleware, requireModulo('nominas'), normativa)
+router.get('/festivos', authMiddleware, requireModulo('nominas'), listFestivos)
+router.get('/valor-hora', authMiddleware, requireModulo('nominas'), valorHora)
 router.get('/', authMiddleware, requireModulo('nominas'), listNominas)
 router.get('/:id', authMiddleware, requireModulo('nominas'), showNomina)
 router.post('/', authMiddleware, requireRole('admin', 'asesor'), requireModulo('nominas'), createNomina)

@@ -1,8 +1,9 @@
 import db from '../db/knex.js'
 import { canAccessEmpresa, esStaff } from '../middlewares/auth.js'
-import { liquidarEmpleado as calcularEmpleado } from '../nomina-calculator.js'
+import { liquidarEmpleado as calcularEmpleado, corteVigente } from '../nomina-calculator.js'
 import { planoNomina, planoConceptos } from '../nomina-plano.js'
 import { NOMINA_PARAMETER_FIELDS, NOMINA_JSON_FIELDS } from '../nomina-parameters.js'
+import { festivosDelAnio, noLaboralInfo } from '../festivos.js'
 
 const round2 = value => Math.round((Number(value) + Number.EPSILON) * 100) / 100
 
@@ -35,6 +36,29 @@ function periodoFechas(nomina) {
   const inicio = segunda ? 16 : 1
   const fin = segunda ? ultimoDia : primera ? 15 : ultimoDia
   return [`${year}-${pad(mes)}-${pad(inicio)}`, `${year}-${pad(mes)}-${pad(fin)}`]
+}
+
+// Festivos del año como Map fecha → nombre. Si la tabla no tiene filas
+// para el año (fuera del rango sembrado por la migración) se calculan por
+// calendario — nunca queda vacío.
+async function festivosDeAnio(anio) {
+  try {
+    const rows = await db('festivos')
+      .select('nombre', db.raw("DATE_FORMAT(fecha, '%Y-%m-%d') as fecha"))
+      .whereRaw('YEAR(fecha) = ?', [anio])
+      .orderBy('fecha')
+    if (rows.length) return new Map(rows.map(r => [r.fecha, r.nombre]))
+  } catch { /* tabla aún no migrada: se calcula por calendario */ }
+  return new Map(festivosDelAnio(anio).map(f => [f.fecha, f.nombre]))
+}
+
+// Parámetros de la vigencia pedida, o la más cercana anterior disponible
+// (consulta amable: una fecha de un año no configurado usa la última
+// vigencia que sí existe).
+async function parametrosDeVigencia(anio) {
+  return await db('nomina_parametros').where('vigencia', anio).first()
+    || await db('nomina_parametros').where('vigencia', '<=', anio).orderBy('vigencia', 'desc').first()
+    || await db('nomina_parametros').orderBy('vigencia', 'desc').first()
 }
 
 export async function getParametros(req, res) {
@@ -88,6 +112,90 @@ export async function updateParametros(req, res) {
   if (!existing) return res.status(404).json({ error: `No hay parámetros para ${vigencia}` })
   await db('nomina_parametros').where('vigencia', vigencia).update({ ...data, updated_at: new Date() })
   res.json({ parametros: await db('nomina_parametros').where('vigencia', vigencia).first() })
+}
+
+// GET /nominas/festivos?anio=AAAA - calendario de días no laborables.
+export async function listFestivos(req, res) {
+  const anio = Number(req.query.anio) || new Date().getFullYear()
+  if (anio < 2000 || anio > 2100) return res.status(400).json({ error: 'Año no válido' })
+  const festivos = [...await festivosDeAnio(anio)].map(([fecha, nombre]) => ({ fecha, nombre }))
+  res.json({ data: festivos })
+}
+
+// GET /nominas/normativa?vigencia=AAAA - consulta de solo lectura de los
+// valores y porcentajes que rigen la liquidación (los mismos que edita el
+// diálogo de parámetros), con el calendario de festivos del año.
+const NORMATIVA_CAMPOS = [
+  'vigencia', 'salario_minimo', 'auxilio_transporte', 'auxilio_tope_smmlv',
+  'uvt', 'jornada_cortes', 'dominical_cortes',
+  'extra_diurna_pct', 'extra_nocturna_pct', 'recargo_nocturno_pct',
+  'extras_max_diarias', 'extras_max_semanales', 'fuente_normativa',
+]
+export async function normativa(req, res) {
+  const hoy = new Date().toISOString().slice(0, 10)
+  const anio = Number(req.query.vigencia) || Number(hoy.slice(0, 4))
+  const parametros = await parametrosDeVigencia(anio)
+  if (!parametros) return res.status(404).json({ error: 'No hay parámetros de nómina configurados' })
+  const jornada = corteVigente(parametros.jornada_cortes, 'horas_semanales', hoy) ?? 48
+  const dominical = corteVigente(parametros.dominical_cortes, 'pct', hoy) ?? 75
+  const vigencias = (await db('nomina_parametros').select('vigencia').orderBy('vigencia', 'desc'))
+    .map(r => r.vigencia)
+  const festivos = [...await festivosDeAnio(anio)].map(([fecha, nombre]) => ({ fecha, nombre }))
+  const campos = Object.fromEntries(NORMATIVA_CAMPOS.map(k => [k, parametros[k]]))
+  res.json({
+    normativa: { ...campos, jornada_semanal: jornada, horas_mes: jornada * 5, dominical_pct: dominical },
+    vigencias,
+    festivos,
+  })
+}
+
+// GET /nominas/valor-hora?salario=&fecha=AAAA-MM-DD - valor de la hora
+// ordinaria y la tabla de recargos/extras vigentes en esa fecha.
+export async function valorHora(req, res) {
+  const salario = Number(req.query.salario)
+  if (!Number.isFinite(salario) || salario <= 0) {
+    return res.status(400).json({ error: 'salario debe ser mayor que cero' })
+  }
+  const fecha = FECHA_RE.test(String(req.query.fecha || ''))
+    ? String(req.query.fecha).slice(0, 10)
+    : new Date().toISOString().slice(0, 10)
+  const parametros = await parametrosDeVigencia(Number(fecha.slice(0, 4)))
+  if (!parametros) return res.status(404).json({ error: 'No hay parámetros de nómina configurados' })
+
+  const jornada = corteVigente(parametros.jornada_cortes, 'horas_semanales', fecha) ?? 48
+  const dominical = corteVigente(parametros.dominical_cortes, 'pct', fecha) ?? 75
+  const extD = Number(parametros.extra_diurna_pct ?? 25)
+  const extN = Number(parametros.extra_nocturna_pct ?? 75)
+  const recN = Number(parametros.recargo_nocturno_pct ?? 35)
+  const valorOrdinaria = salario / (jornada * 5)
+  const fila = (concepto, recargoPct, factor) => ({
+    concepto,
+    recargo_pct: recargoPct === null ? null : round2(recargoPct),
+    factor: round2(factor),
+    valor: round2(valorOrdinaria * factor),
+  })
+  const conceptos = [
+    fila('Hora ordinaria diurna', null, 1),
+    fila('Recargo nocturno (ordinario)', recN, 1 + recN / 100),
+    fila('Hora extra diurna', extD, 1 + extD / 100),
+    fila('Hora extra nocturna', extN, 1 + extN / 100),
+    fila('Dominical/festivo diurna', dominical, 1 + dominical / 100),
+    fila('Dominical/festivo nocturna', dominical + recN, 1 + dominical / 100 + recN / 100),
+    fila('Extra diurna dominical/festivo', extD + dominical, 1 + extD / 100 + dominical / 100),
+    fila('Extra nocturna dominical/festivo', extN + dominical, 1 + extN / 100 + dominical / 100),
+  ]
+  const noLaboral = noLaboralInfo(fecha, await festivosDeAnio(Number(fecha.slice(0, 4))))
+  res.json({
+    salario, fecha,
+    vigencia: parametros.vigencia,
+    jornada_semanal: jornada,
+    horas_mes: jornada * 5,
+    dominical_pct: dominical,
+    valor_hora: round2(valorOrdinaria),
+    es_no_laboral: noLaboral.es_no_laboral,
+    motivo_no_laboral: noLaboral.motivo,
+    conceptos,
+  })
 }
 
 // GET /nominas/conceptos - catálogo de conceptos (filtros server-side:
@@ -260,6 +368,15 @@ export async function liquidar(req, res) {
 
   const parametros = await db('nomina_parametros').where('vigencia', nomina.vigencia).first()
   if (!parametros) return res.status(400).json({ error: `No hay parámetros para la vigencia ${nomina.vigencia}` })
+
+  // Festivos de la vigencia y el año adyacente (períodos que cruzan diciembre/
+  // enero): se adjuntan a los parámetros para marcar filas de horas en día
+  // no laboral y quedan en el snapshot de la liquidación.
+  const festivosMap = new Map()
+  for (let a = Number(nomina.vigencia) - 1; a <= Number(nomina.vigencia) + 1; a++) {
+    for (const [fecha, nombre] of await festivosDeAnio(a)) festivosMap.set(fecha, nombre)
+  }
+  parametros.festivos = Object.fromEntries(festivosMap)
 
   const empleados = await db('empleados')
     .where('empresa_id', nomina.empresa_id)

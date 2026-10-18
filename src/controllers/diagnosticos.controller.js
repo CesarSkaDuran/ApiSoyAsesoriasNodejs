@@ -124,9 +124,12 @@ export async function show(req, res) {
 
   // Métricas: preguntas respondidas + docs obligatorios cargados
   const [{ preguntas_total }] = await db('diagnostico_preguntas').where('activo', true).count('* as preguntas_total')
+  // valor guarda texto plano; valor_json guarda arreglos (p. ej. opción múltiple)
   const [{ respondidas }] = await db('diagnostico_respuestas')
     .where('diagnostico_id', d.id)
-    .whereNotNull('valor').where('valor', '!=', '')
+    .where(b => b
+      .where(x => x.whereNotNull('valor').where('valor', '!=', ''))
+      .orWhere(x => x.whereNotNull('valor_json').whereNotIn('valor_json', ['', '[]', 'null', '""'])))
     .count('* as respondidas')
 
   const [{ docs_obligatorios }] = await db('diagnostico_doc_config')

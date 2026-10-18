@@ -42,6 +42,10 @@ async function duenoDeDoc(ownerCol, ownerId) {
   if (ownerCol === 'persona_id') {
     return { empresaId: null, personaId: Number(ownerId) }
   }
+  if (ownerCol === 'planilla_id') {
+    const planilla = await db('planillas').where('id', ownerId).first('empresa_id', 'persona_id')
+    return { empresaId: planilla?.empresa_id ?? null, personaId: planilla?.persona_id ?? null }
+  }
   return { empresaId: await empresaDeOwner(ownerCol, ownerId), personaId: null }
 }
 

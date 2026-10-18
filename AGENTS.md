@@ -65,25 +65,42 @@
 - Mantener `src/index.js` sin top-level await: el cargador Passenger/LiteSpeed
   requiere la entrada y no soporta módulos ESM con top-level await.
 
-## Reinicio de producción (cPanel / LiteSpeed)
+## Despliegue y reinicio en producción (cPanel / LiteSpeed)
 
-- La API de producción corre como `lsnode` en `/home/soyaseso/soyasesorias-api-app/`.
-  Después de subir cambios del API, identifica sus procesos:
+- URL pública: `https://conexion.soyasesorias.co`
+- Raíz de la app (código fuente): `/home/soyaseso/soyasesorias-api-app`
+- Document root del dominio: `/home/soyaseso/conexion.soyasesorias.co`
+  (solo contiene la configuración `.htaccess`; no subir código ahí)
+- Node: `/home/soyaseso/nodevenv/soyasesorias-api-app/20/bin/node`
+- Startup file: `src/index.js`; el proceso lo administra LiteSpeed/CloudLinux.
+  No iniciar otra instancia con `npm start` desde la terminal.
+- Al desplegar: subir solo código fuente. No tocar `.env`, `storage/`,
+  `uploads/` ni los `.htaccess` generados por CloudLinux.
 
-  ```bash
-  ps -u "$USER" -o pid,etime,cmd | grep -E '[n]ode|[p]m2|[p]assenger'
-  ```
+```bash
+source /home/soyaseso/nodevenv/soyasesorias-api-app/20/bin/activate
+cd /home/soyaseso/soyasesorias-api-app
 
-- Termina **solo** los PID cuya línea sea
-  `lsnode:/home/soyaseso/soyasesorias-api-app/` (puede haber más de uno):
+# Identifica solo los workers de esta aplicación
+ps -u "$USER" -o pid,etime,cmd | grep -E '[n]ode|[p]m2|[p]assenger'
 
-  ```bash
-  kill -TERM <PID1> <PID2>
-  ```
+# Termina los PID actuales cuya línea sea lsnode:/home/soyaseso/soyasesorias-api-app/
+kill -TERM <PID1> <PID2>
+sleep 2
+
+# Confirma que LiteSpeed levantó un PID nuevo
+ps -u "$USER" -o pid,etime,cmd | grep -E '[n]ode|[p]m2|[p]assenger'
+```
 
 - LiteSpeed vuelve a levantar la aplicación al recibir la siguiente petición.
-  Confirma que aparezca un PID nuevo con el mismo `ps`. No reutilices PID de
-  reinicios anteriores y no uses `killall node`/`pkill node`, porque podrías
-  detener otras aplicaciones del servidor.
+  Los PID cambian en cada reinicio: no reutilices números anteriores ni uses
+  `killall node`/`pkill node`, porque podrías detener otras aplicaciones.
 - `npm start` ejecuta las migraciones antes de escuchar; revisa el log de
-  cPanel/LiteSpeed tras el reinicio para confirmar que terminaron correctamente.
+  cPanel/LiteSpeed tras reiniciar para confirmar que terminaron correctamente.
+- Verificación sin autenticación:
+
+```bash
+curl -i https://conexion.soyasesorias.co/health                          # 200
+curl -i https://conexion.soyasesorias.co/swagger.json                    # 200
+curl -i https://conexion.soyasesorias.co/api/diagnosticos                # 401 (existe)
+```

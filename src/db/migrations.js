@@ -1,5 +1,6 @@
 import db from './knex.js'
 import { NOMINA_PARAMETER_DEFAULTS, NOMINA_JSON_FIELDS } from '../nomina-parameters.js'
+import { festivosDelAnio } from '../festivos.js'
 import { migrateIdentidades } from './migrate-identidades.js'
 
 // Schema nuevo para SoyAsesorias.
@@ -606,6 +607,38 @@ export async function runMigrations() {
     .where('fuente_normativa', 'Decretos 0159 y 1470 de 2026; Resolución DIAN 000238 de 2025; tasas SGSS vigentes 2026.')
     .update({ fuente_normativa: NOMINA_PARAMETER_DEFAULTS[2026].fuente_normativa })
 
+  // Festivos nacionales (días no laborables): fecha fija, Ley Emiliani y
+  // dependientes de la Pascua. Se siembran por adelantado (año actual -2
+  // hasta +3) y solo se insertan las fechas faltantes: las filas editadas
+  // a mano (p. ej. festivos regionales) se conservan.
+  if (!await db.schema.hasTable('festivos')) {
+    await createTable('festivos', t => {
+      t.increments('id')
+      t.date('fecha').notNullable().unique()
+      t.string('nombre', 120).notNullable()
+      t.timestamps(true, true)
+    })
+    console.log('  + festivos')
+  }
+  {
+    const anioActual = new Date().getFullYear()
+    const existentes = new Set(
+      (await db('festivos').select(db.raw("DATE_FORMAT(fecha, '%Y-%m-%d') as fecha"))).map(r => r.fecha)
+    )
+    const faltantes = []
+    for (let a = anioActual - 2; a <= anioActual + 3; a++) {
+      for (const f of festivosDelAnio(a)) {
+        if (!existentes.has(f.fecha)) {
+          faltantes.push({ ...f, created_at: new Date(), updated_at: new Date() })
+        }
+      }
+    }
+    if (faltantes.length) {
+      await db('festivos').insert(faltantes)
+      console.log(`  ~ festivos: ${faltantes.length} fechas sembradas`)
+    }
+  }
+
   if (!await db.schema.hasTable('horas_extras')) {
     await createTable('horas_extras', t => {
       t.increments('id')
@@ -782,16 +815,52 @@ export async function runMigrations() {
   if (!await db.schema.hasTable('planillas')) {
     await createTable('planillas', t => {
       t.increments('id')
-      t.integer('empresa_id').unsigned().references('id').inTable('empresas').notNullable().index()
+      t.integer('empresa_id').unsigned().references('id').inTable('empresas').nullable().index()
+      t.integer('persona_id').unsigned().references('id').inTable('personas').onDelete('CASCADE').nullable().index()
       t.integer('nomina_id').unsigned().references('id').inTable('nominas').onDelete('SET NULL').nullable()
       t.string('numero_planilla', 100).nullable()
       t.string('periodo', 20).nullable()
+      t.decimal('ingreso_mensual', 15, 2).nullable()
+      t.decimal('ingreso_adicional', 15, 2).nullable()
+      t.decimal('ingreso_total', 15, 2).nullable()
       t.decimal('valor_total', 15, 2).defaultTo(0)
       t.date('fecha_pago').nullable()
-      t.enum('status', ['generada', 'pagada', 'verificada']).defaultTo('generada')
+      t.enum('status', ['solicitada', 'generada', 'pagada', 'verificada']).defaultTo('generada')
+      t.unique(['persona_id', 'periodo'], 'planillas_persona_periodo_unique')
       t.timestamps(true, true)
     })
     console.log('  + planillas')
+  } else {
+    const [empresaIdCol] = await db.raw("SHOW COLUMNS FROM planillas LIKE 'empresa_id'")
+    if (empresaIdCol[0]?.Null === 'NO') {
+      await db.raw('ALTER TABLE planillas MODIFY empresa_id INT UNSIGNED NULL')
+      console.log('  ~ planillas.empresa_id nullable')
+    }
+    if (!await db.schema.hasColumn('planillas', 'persona_id')) {
+      await db.schema.alterTable('planillas', t => {
+        t.integer('persona_id').unsigned().nullable().index()
+        t.foreign('persona_id', 'planillas_persona_id_fk').references('id').inTable('personas').onDelete('CASCADE')
+      })
+      console.log('  + planillas.persona_id')
+    }
+    for (const col of ['ingreso_mensual', 'ingreso_adicional', 'ingreso_total']) {
+      if (!await db.schema.hasColumn('planillas', col)) {
+        await db.schema.alterTable('planillas', t => { t.decimal(col, 15, 2).nullable() })
+        console.log(`  + planillas.${col}`)
+      }
+    }
+    const [indicesPlanillas] = await db.raw('SHOW INDEX FROM planillas')
+    if (!indicesPlanillas.some(i => i.Key_name === 'planillas_persona_periodo_unique')) {
+      await db.schema.alterTable('planillas', t => {
+        t.unique(['persona_id', 'periodo'], 'planillas_persona_periodo_unique')
+      })
+      console.log('  + planillas persona/periodo unique')
+    }
+    const [statusCol] = await db.raw("SHOW COLUMNS FROM planillas LIKE 'status'")
+    if (statusCol[0]?.Type && !statusCol[0].Type.includes("'solicitada'")) {
+      await db.raw("ALTER TABLE planillas MODIFY status ENUM('solicitada','generada','pagada','verificada') NOT NULL DEFAULT 'generada'")
+      console.log('  ~ planillas.status +solicitada')
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -2145,8 +2214,6 @@ export async function runMigrations() {
   }
   // Marcador {{firma}}: la firma guardada por la empresa se inserta ahí. Si
   // una plantilla personalizada no lo incluye, la firma se agrega al final.
-  // Marcador {{firma}}: la firma guardada por la empresa se inserta ahí. Si
-  // una plantilla personalizada no lo incluye, la firma se agrega al final.
   const plantillasBase = [
     {
       tipo: 'certificado_laboral',
@@ -2188,6 +2255,15 @@ export async function runMigrations() {
     if (faltantes.length) {
       await db.schema.alterTable('empresas', t => faltantes.forEach(def => def(t)))
       console.log(`  + empresas: membrete y firma (${faltantes.length} columnas)`)
+    }
+  }
+
+  // Independientes: salario base e ingresos adicionales propios. Con ese
+  // salario se liquida su planilla de seguridad social (no tienen empleados).
+  for (const col of ['salario_base', 'ingresos_adicionales']) {
+    if (!await db.schema.hasColumn('personas', col)) {
+      await db.schema.alterTable('personas', t => { t.decimal(col, 15, 2).nullable() })
+      console.log(`  + personas.${col}`)
     }
   }
 
