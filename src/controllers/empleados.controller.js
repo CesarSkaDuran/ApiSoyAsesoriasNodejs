@@ -1,5 +1,6 @@
 import db from '../db/knex.js'
-import { canAccessEmpresa, esStaff } from '../middlewares/auth.js'
+import bcrypt from 'bcryptjs'
+import { canAccessEmpresa, canAccessEmpleado, esStaff } from '../middlewares/auth.js'
 import { resolverIdentidad, personaPublica, normalizarDocumento, errorIdentidad } from '../services/personas-identidad.js'
 import { createReadStream, existsSync, unlinkSync } from 'fs'
 import { extname, resolve } from 'path'
@@ -148,7 +149,81 @@ export async function show(req, res) {
       .first(),
   ])
 
-  res.json({ empleado: { ...empleado, ...joins }, beneficiarios, documentos, incapacidades, periodos })
+  const portalUser = empleado.user_id
+    ? await db('users').where('id', empleado.user_id).select('id', 'email', 'is_active', 'last_seen_at').first()
+    : null
+  res.json({ empleado: { ...empleado, ...joins, portal_user: portalUser || null }, beneficiarios, documentos, incapacidades, periodos })
+}
+
+// Crea la cuenta de autoservicio del empleado. Admin/asesor y la empresa
+// dueña pueden administrarla; el trabajador nunca puede crear otras cuentas.
+export async function createTrabajadorUser(req, res) {
+  if (!['admin', 'asesor', 'empresa'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Sin permiso para gestionar cuentas de trabajadores' })
+  }
+  const empleado = await db('empleados').where('id', req.params.id).first()
+  if (!empleado) return res.status(404).json({ error: 'Empleado no encontrado' })
+  if (!canAccessEmpleado(req.user, empleado)) return res.status(403).json({ error: 'Sin acceso a este empleado' })
+  if (empleado.status !== 'activo') return res.status(409).json({ error: 'Solo empleados activos pueden tener acceso al portal' })
+  if (empleado.user_id) return res.status(409).json({ error: 'Este empleado ya tiene una cuenta vinculada' })
+
+  const email = String(req.body.email || empleado.email || '').trim().toLowerCase()
+  const password = String(req.body.password || '')
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: 'Indica un correo válido para el acceso' })
+  }
+  if (password.length < 8) return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' })
+  let user
+  try {
+    await db.transaction(async trx => {
+      const current = await trx('empleados').where('id', empleado.id).forUpdate().first()
+      if (current.user_id) throw Object.assign(new Error('Este empleado ya tiene una cuenta vinculada'), { status: 409 })
+      if (await trx('users').where('email', email).first('id')) {
+        throw Object.assign(new Error('Ya existe un usuario con ese correo'), { status: 409 })
+      }
+      const [userId] = await trx('users').insert({
+        name: empleado.primer_nombre,
+        lastname: [empleado.segundo_nombre, empleado.primer_apellido, empleado.segundo_apellido].filter(Boolean).join(' '),
+        email,
+        password: bcrypt.hashSync(password, 10),
+        role: 'trabajador',
+        is_active: true,
+      })
+      await trx('empleados').where({ id: empleado.id, user_id: null }).update({ user_id: userId })
+      await trx('user_modulos').insert({ user_id: userId, home: true, solicitudes: true })
+      user = { id: userId, email, role: 'trabajador', is_active: true }
+    })
+  } catch (err) {
+    if (err.status === 409 || err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: err.status === 409 ? err.message : 'Ya existe un usuario o cuenta vinculada' })
+    }
+    throw err
+  }
+  res.status(201).json({ user })
+}
+
+// Admin/asesor o empresa pueden suspender/reactivar la cuenta o restablecer
+// su contraseña. El vínculo laboral se conserva para auditoría.
+export async function updateTrabajadorUser(req, res) {
+  if (!['admin', 'asesor', 'empresa'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Sin permiso para gestionar cuentas de trabajadores' })
+  }
+  const empleado = await db('empleados').where('id', req.params.id).first()
+  if (!empleado) return res.status(404).json({ error: 'Empleado no encontrado' })
+  if (!canAccessEmpleado(req.user, empleado)) return res.status(403).json({ error: 'Sin acceso a este empleado' })
+  if (!empleado.user_id) return res.status(404).json({ error: 'Este empleado no tiene cuenta del portal' })
+
+  const changes = {}
+  if (req.body.is_active !== undefined) changes.is_active = !!req.body.is_active
+  if (req.body.password !== undefined) {
+    if (String(req.body.password).length < 8) {
+      return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' })
+    }
+    changes.password = bcrypt.hashSync(String(req.body.password), 10)
+  }
+  if (!Object.keys(changes).length) return res.status(400).json({ error: 'Indica is_active o una nueva contraseña' })
+  await db('users').where({ id: empleado.user_id, role: 'trabajador' }).update(changes)
+  res.json({ ok: true })
 }
 
 // POST /empleados - empresa_id: admin lo elige; empresa usa el suyo siempre

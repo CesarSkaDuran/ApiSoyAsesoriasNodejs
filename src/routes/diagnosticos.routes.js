@@ -8,6 +8,7 @@ import {
   uploadDocumento, revisarDocumento, downloadDocumento, removeDocumento,
   getInforme, saveInforme, listDocEstados, exportEntrevista,
   listEntregables, uploadEntregable, downloadEntregable, removeEntregable,
+  cotizarEntregable, generarCobro, setDescuentoTotal, getTarifa, putTarifa,
   listPreguntas, createPregunta, updatePregunta, deletePregunta,
   listDocConfigs, createDocConfig, updateDocConfig, deleteDocConfig,
   listDocEstadosAll, createDocEstado, updateDocEstado, deleteDocEstado,
@@ -40,7 +41,10 @@ router.put('/diagnosticos/:id/respuestas', authMiddleware, requireModulo('diagno
 
 // entregables: el staff publica, ambos listan/descargan
 router.get('/diagnosticos/:id/entregables', authMiddleware, requireModulo('diagnosticos'), listEntregables)
-router.post('/diagnosticos/:id/entregables', authMiddleware, requireRole('admin', 'asesor'), requireModulo('diagnosticos'), upload.single('archivo'), uploadEntregable)
+router.post('/diagnosticos/:id/entregables', authMiddleware, requireModulo('diagnosticos'), upload.single('archivo'), uploadEntregable)
+router.put('/diagnosticos/entregables/:eid/cotizacion', authMiddleware, requireRole('admin', 'asesor'), requireModulo('diagnosticos'), cotizarEntregable)
+router.post('/diagnosticos/:id/cobro', authMiddleware, requireRole('admin'), requireModulo('diagnosticos'), generarCobro)
+router.put('/diagnosticos/:id/descuento', authMiddleware, requireRole('admin', 'asesor'), requireModulo('diagnosticos'), setDescuentoTotal)
 
 // documentos del diagnóstico
 router.get('/diagnosticos/:id/documentos', authMiddleware, requireModulo('diagnosticos'), diagDocumentos)
@@ -65,6 +69,8 @@ config.get('/estados', listDocEstadosAll)
 config.post('/estados', createDocEstado)
 config.put('/estados/:id', updateDocEstado)
 config.delete('/estados/:id', deleteDocEstado)
+config.get('/tarifa', getTarifa)
+config.put('/tarifa', putTarifa)
 router.use('/diagnostico-config', config)
 
 export default router

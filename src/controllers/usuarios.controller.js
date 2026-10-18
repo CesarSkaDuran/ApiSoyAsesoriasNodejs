@@ -9,12 +9,15 @@ export async function list(req, res) {
   const query = db('users')
     .leftJoin('empresas', 'users.id', 'empresas.user_id')
     .leftJoin('personas', 'users.id', 'personas.user_id')
+    .leftJoin('empleados', 'users.id', 'empleados.user_id')
     .leftJoin('user_modulos', 'users.id', 'user_modulos.user_id')
     .select('users.id', 'users.name', 'users.lastname', 'users.email', 'users.role',
       'users.is_active', 'users.created_at',
       'empresas.id as empresa_id', 'empresas.razon_social as empresa_nombre',
       'personas.id as persona_id',
       db.raw("CONCAT_WS(' ', personas.primer_nombre, personas.primer_apellido) as persona_nombre"),
+      'empleados.id as empleado_id',
+      db.raw("CONCAT_WS(' ', empleados.primer_nombre, empleados.primer_apellido) as empleado_nombre"),
       'user_modulos.id as modulos_id')
 
   if (role) query.where('users.role', role)
@@ -25,6 +28,8 @@ export async function list(req, res) {
       q.where('users.name', 'like', `%${search}%`)
        .orWhere('users.email', 'like', `%${search}%`)
        .orWhere('empresas.razon_social', 'like', `%${search}%`)
+       .orWhere('empleados.primer_nombre', 'like', `%${search}%`)
+       .orWhere('empleados.numero_documento', 'like', `%${search}%`)
     )
   }
 
@@ -37,7 +42,7 @@ export async function list(req, res) {
   res.json({ data, total, page: Number(page), per_page: Number(per_page) })
 }
 
-// GET /usuarios/:id - con empresa/persona/modulos asociados
+// GET /usuarios/:id - con empresa/persona/empleado/modulos asociados
 export async function show(req, res) {
   const user = await db('users')
     .where('users.id', req.params.id)
@@ -46,12 +51,13 @@ export async function show(req, res) {
     .first()
   if (!user) return res.status(404).json({ error: 'Usuario no encontrado' })
 
-  const [empresa, persona, modulos] = await Promise.all([
+  const [empresa, persona, empleado, modulos] = await Promise.all([
     db('empresas').where('user_id', user.id).first(),
     db('personas').where('user_id', user.id).first(),
+    db('empleados').where('user_id', user.id).first(),
     db('user_modulos').where('user_id', user.id).first(),
   ])
-  res.json({ user, empresa, persona, modulos })
+  res.json({ user, empresa, persona, empleado, modulos })
 }
 
 // PUT /usuarios/:id - activar/desactivar, cambiar modulos

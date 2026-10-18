@@ -1,6 +1,6 @@
 import db from '../db/knex.js'
 import { esStaff } from '../middlewares/auth.js'
-import { createReadStream, existsSync } from 'fs'
+import { createReadStream, existsSync, unlinkSync } from 'fs'
 import { resolve } from 'path'
 import { notificarAdmins, notificarCambioEstado, notificarCliente } from '../services/notificaciones.js'
 
@@ -235,6 +235,7 @@ export async function entrevista(req, res) {
       opciones: p.opciones ? JSON.parse(p.opciones) : null,
       respuesta: map[p.id]?.valor ?? null,
       respuesta_json: map[p.id]?.valor_json ? JSON.parse(map[p.id].valor_json) : null,
+      comentario: map[p.id]?.comentario ?? null,
     })),
   })
 }
@@ -245,25 +246,69 @@ export async function saveRespuestas(req, res) {
   if (!d) return
 
   const respuestas = req.body.respuestas || {}
+  const comentarios = req.body.comentarios || {}
   const preguntas = await db('diagnostico_preguntas').where('activo', true)
   const validIds = new Set(preguntas.map(p => p.id))
 
+  const tareasCliente = []
   await db.transaction(async trx => {
-    for (const [pid, valor] of Object.entries(respuestas)) {
-      const preguntaId = Number(pid)
+    // Respuesta y comentario se guardan por separado: enviar solo uno no borra el otro
+    const ids = new Set([...Object.keys(respuestas), ...Object.keys(comentarios)].map(Number))
+    for (const preguntaId of ids) {
       if (!validIds.has(preguntaId)) continue
-      const esJson = typeof valor !== 'string'
+      const cambios = {}
+      if (Object.prototype.hasOwnProperty.call(respuestas, preguntaId)) {
+        const valor = respuestas[preguntaId]
+        const esJson = typeof valor !== 'string'
+        cambios.valor = esJson ? null : String(valor ?? '')
+        cambios.valor_json = esJson ? JSON.stringify(valor) : null
+      }
+      if (Object.prototype.hasOwnProperty.call(comentarios, preguntaId)) {
+        cambios.comentario = String(comentarios[preguntaId] ?? '').trim() || null
+      }
+      if (!Object.keys(cambios).length) continue
       await trx('diagnostico_respuestas')
-        .insert({
-          diagnostico_id: d.id,
-          pregunta_id: preguntaId,
-          valor: esJson ? null : String(valor ?? ''),
-          valor_json: esJson ? JSON.stringify(valor) : null,
-        })
+        .insert({ diagnostico_id: d.id, pregunta_id: preguntaId, ...cambios })
         .onConflict(['diagnostico_id', 'pregunta_id'])
-        .merge()
+        .merge(Object.keys(cambios))
+    }
+
+    // Preguntas enlazadas: si el padre no coincide con mostrar_si, la hija
+    // queda oculta y se borra su respuesta para no dejar datos huérfanos
+    const actuales = await trx('diagnostico_respuestas').where('diagnostico_id', d.id)
+    const mapa = Object.fromEntries(actuales.map(r => [r.pregunta_id, r]))
+    for (const h of preguntas.filter(x => x.pregunta_padre_id)) {
+      const padre = mapa[h.pregunta_padre_id]
+      if (!padre || !coincideRespuesta(padre, h.mostrar_si)) {
+        await trx('diagnostico_respuestas').where({ diagnostico_id: d.id, pregunta_id: h.id }).del()
+      }
+    }
+
+    // Pregunta con documento asociado -> tarea pendiente con el nombre del
+    // documento. "Sí" (cumple) la asigna al cliente, que debe entregarla;
+    // "No" (no cumple) la asigna al equipo, que debe prepararla. Solo se
+    // tocan las pendientes: los archivos ya entregados no cambian.
+    for (const p of preguntas.filter(x => x.documento_nombre && ![undefined, null, ''].includes(respuestas[x.id]))) {
+      const asignado = asignadoDeRespuesta(respuestas[p.id])
+      const pendiente = { diagnostico_id: d.id, titulo: p.documento_nombre, estado: 'pendiente' }
+      await trx('diagnostico_entregables').where(pendiente).whereNot('asignado_a', asignado).del()
+      const existe = await trx('diagnostico_entregables').where({ ...pendiente, asignado_a: asignado }).first()
+      if (!existe) {
+        await trx('diagnostico_entregables').insert({ ...pendiente, asignado_a: asignado, ruta_archivo: null })
+        if (asignado === 'cliente') tareasCliente.push(p.documento_nombre)
+      }
     }
   })
+
+  for (const nombre of tareasCliente) {
+    notificarCliente({
+      entidad: 'diagnostico', entidadId: d.id,
+      titulo: `Documento requerido — diagnóstico "${d.nombre}"`,
+      mensaje: `Debes entregar "${nombre}". Súbelo desde la pestaña Entregables.`,
+      url: '/admin/diagnosticos',
+      empresaId: d.empresa_id, personaId: d.persona_id,
+    })
+  }
 
   res.json({ ok: true })
 
@@ -291,7 +336,7 @@ export async function exportEntrevista(req, res) {
   const map = Object.fromEntries(respuestas.map(r => [r.pregunta_id, r]))
 
   const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
-  const filas = [['N°', 'Pregunta', 'Tipo', 'Obligatoria', 'Respuesta', 'Fecha'].join(';')]
+  const filas = [['N°', 'Pregunta', 'Tipo', 'Obligatoria', 'Respuesta', 'Comentario', 'Fecha'].join(';')]
   preguntas.forEach((p, i) => {
     const r = map[p.id]
     const valor = r?.valor ?? (r?.valor_json ? JSON.parse(r.valor_json) : '')
@@ -301,6 +346,7 @@ export async function exportEntrevista(req, res) {
       esc(p.tipo_respuesta),
       p.es_obligatoria ? 'Sí' : 'No',
       esc(Array.isArray(valor) ? valor.join(', ') : valor),
+      esc(r?.comentario ?? ''),
       esc(r?.updated_at ? new Date(r.updated_at).toLocaleString('es-CO') : ''),
     ].join(';'))
   })
@@ -470,6 +516,21 @@ export async function downloadDocumento(req, res) {
 // que el cliente los descargue (dirección inversa a los requeridos).
 // ════════════════════════════════════════════════════════════════════════════
 
+// ¿La respuesta guardada activa la pregunta hija? Para selección múltiple basta
+// con que incluya el valor configurado en mostrar_si.
+const coincideRespuesta = (row, mostrarSi) => {
+  if (mostrarSi === null || mostrarSi === undefined) return false
+  if (row.valor_json) {
+    const arr = JSON.parse(row.valor_json)
+    return Array.isArray(arr) ? arr.map(String).includes(String(mostrarSi)) : String(arr) === String(mostrarSi)
+  }
+  return row.valor !== null && String(row.valor) === String(mostrarSi)
+}
+
+// Responsable de la tarea pendiente según la respuesta: No / no cumple -> equipo
+const asignadoDeRespuesta = (valor) =>
+  ['0', 'false', 'no', 'no cumple'].includes(String(valor).trim().toLowerCase()) ? 'admin' : 'cliente'
+
 async function findEntregable(req, res) {
   const e = await db('diagnostico_entregables').where('id', req.params.eid).first()
   if (!e) {
@@ -493,7 +554,138 @@ export async function listEntregables(req, res) {
     .where('e.diagnostico_id', d.id)
     .select('e.*', 'u.name as subido_por_nombre')
     .orderBy('e.id', 'desc')
-  res.json({ data: rows })
+  const subtotal = round2(rows.filter(e => e.asignado_a === 'admin').reduce((s, e) => s + Number(e.valor || 0), 0))
+  const descuentos = Math.min(round2(d.descuento_total || 0), subtotal)
+  res.json({
+    data: rows,
+    subtotal,
+    descuentos,
+    total: round2(subtotal - descuentos),
+    cuenta_cobro_id: d.cuenta_cobro_id ?? null,
+  })
+}
+
+const round2 = (n) => Math.round(Number(n) * 100) / 100
+const netoDe = (e) => round2(e.valor || 0)
+
+async function getTarifaHora() {
+  const row = await db('diagnostico_parametros').where('clave', 'tarifa_hora').first()
+  return Number(row?.valor || 0)
+}
+
+// PUT /diagnosticos/:id/descuento { descuento } — descuento sobre el total
+// de los entregables cotizados. Se bloquea cuando ya existe el cobro.
+export async function setDescuentoTotal(req, res) {
+  const d = await findDiagnostico(req, res)
+  if (!d) return
+  if (d.cuenta_cobro_id) return res.status(409).json({ message: 'El cobro ya fue generado; no se puede cambiar el descuento' })
+  const descuento = Number(req.body.descuento)
+  if (!Number.isFinite(descuento) || descuento < 0) return res.status(400).json({ message: 'El descuento debe ser un número mayor o igual a 0' })
+
+  const subtotal = round2((await db('diagnostico_entregables')
+    .where({ diagnostico_id: d.id, asignado_a: 'admin', estado: 'entregado' }))
+    .reduce((s, e) => s + Number(e.valor || 0), 0))
+  if (descuento > subtotal) return res.status(400).json({ message: `El descuento no puede superar el subtotal (${subtotal.toLocaleString('es-CO')})` })
+
+  await db('diagnosticos').where('id', d.id).update({ descuento_total: round2(descuento) })
+  res.json({ descuento_total: round2(descuento), subtotal })
+}
+
+// GET /diagnostico-config/tarifa
+export async function getTarifa(req, res) {
+  res.json({ tarifa_hora: await getTarifaHora() })
+}
+
+// PUT /diagnostico-config/tarifa { tarifa_hora }
+export async function putTarifa(req, res) {
+  const tarifa = Number(req.body.tarifa_hora)
+  if (!Number.isFinite(tarifa) || tarifa < 0) return res.status(400).json({ message: 'La tarifa debe ser un número mayor o igual a 0' })
+  await db('diagnostico_parametros').where('clave', 'tarifa_hora').update({ valor: String(round2(tarifa)), updated_at: db.fn.now() })
+  res.json({ tarifa_hora: round2(tarifa) })
+}
+
+// PUT /diagnosticos/entregables/:eid/cotizacion { horas } — solo entregables
+// del equipo ya entregados. Guarda la tarifa vigente como snapshot.
+export async function cotizarEntregable(req, res) {
+  const found = await findEntregable(req, res)
+  if (!found) return
+  const { entregable, diagnostico } = found
+  if (diagnostico.cuenta_cobro_id) return res.status(409).json({ message: 'El cobro ya fue generado; no se pueden cambiar las horas' })
+  if (entregable.asignado_a !== 'admin' || entregable.estado !== 'entregado') {
+    return res.status(400).json({ message: 'Solo se cotizan entregables del equipo ya entregados' })
+  }
+  const horas = req.body.horas !== undefined ? Number(req.body.horas) : Number(entregable.horas || 0)
+  if (!Number.isFinite(horas) || horas < 0) return res.status(400).json({ message: 'Las horas deben ser un número mayor o igual a 0' })
+  // Al cambiar horas se usa la tarifa vigente; si solo cambia el descuento se conserva la ya cotizada
+  const valorHora = req.body.horas !== undefined || entregable.valor_hora === null
+    ? await getTarifaHora()
+    : Number(entregable.valor_hora)
+  const valor = round2(horas * valorHora)
+  await db('diagnostico_entregables').where('id', entregable.id).update({
+    horas: round2(horas), valor_hora: round2(valorHora), valor,
+  })
+  res.json({ entregable: await db('diagnostico_entregables').where('id', entregable.id).first() })
+}
+
+// POST /diagnosticos/:id/cobro — genera una cuenta de cobro pendiente en
+// Pagos con una línea por entregable cotizado. Una sola vez por diagnóstico.
+export async function generarCobro(req, res) {
+  const d = await findDiagnostico(req, res)
+  if (!d) return
+  if (d.cuenta_cobro_id) return res.status(409).json({ message: 'El cobro ya fue generado' })
+
+  const items = await db('diagnostico_entregables')
+    .where({ diagnostico_id: d.id, asignado_a: 'admin', estado: 'entregado' })
+    .whereNotNull('valor').where('valor', '>', 0)
+    .orderBy('id')
+  if (!items.length) return res.status(400).json({ message: 'No hay entregables cotizados para cobrar' })
+
+  const subtotal = round2(items.reduce((s, e) => s + netoDe(e), 0))
+  const descuento = Math.min(round2(d.descuento_total || 0), subtotal)
+  const total = round2(subtotal - descuento)
+  if (total <= 0) return res.status(400).json({ message: 'El total a cobrar es 0; revisa el descuento' })
+
+  const credito = req.body.forma_pago === 'credito'
+  if (credito && !req.body.fecha_vencimiento) return res.status(400).json({ message: 'Indica la fecha de vencimiento del crédito' })
+
+  let cuentaId
+  await db.transaction(async trx => {
+    ;[cuentaId] = await trx('cuentas_cobro').insert({
+      forma_pago: credito ? 'credito' : 'contado',
+      fecha_vencimiento: credito ? req.body.fecha_vencimiento : null,
+      empresa_id: d.empresa_id || null,
+      persona_id: d.persona_id || null,
+      tipo: 1,
+      nombre: `Diagnóstico #${d.id} — ${d.nombre}`,
+      fecha: new Date(),
+      valor_total: total,
+      iva: 0,
+      cuatroxmil: 0,
+      obs: 'Generado desde el módulo de diagnósticos',
+      status: 2,
+    })
+    const lineas = items.map(e => ({
+      cuenta_cobro_id: cuentaId,
+      descripcion: e.titulo || e.nombre_original || `Entregable #${e.id}`,
+      cantidad: Number(e.horas),
+      valor: netoDe(e),
+    }))
+    if (descuento > 0) {
+      lineas.push({ cuenta_cobro_id: cuentaId, descripcion: 'Descuento', cantidad: 1, valor: -descuento })
+    }
+    await trx('detalle_cobro').insert(lineas)
+    await trx('diagnosticos').where('id', d.id).update({ cuenta_cobro_id: cuentaId })
+  })
+
+  res.status(201).json({ cuenta_cobro_id: cuentaId, total })
+
+  notificarCliente({
+    entidad: 'diagnostico', entidadId: d.id,
+    titulo: `Cobro generado — diagnóstico "${d.nombre}"`,
+    mensaje: `Se generó una cuenta de cobro por $${total.toLocaleString('es-CO')}. Revísala en Pagos.`,
+    url: '/admin/pagos',
+    empresaId: d.empresa_id, personaId: d.persona_id,
+  })
 }
 
 // POST /diagnosticos/:id/entregables — solo staff
@@ -502,24 +694,61 @@ export async function uploadEntregable(req, res) {
   if (!d) return
   if (!req.file) return res.status(400).json({ message: 'Archivo requerido' })
 
-  const [id] = await db('diagnostico_entregables').insert({
-    diagnostico_id: d.id,
-    titulo: (req.body.titulo || '').trim() || req.file.originalname,
+  const archivo = {
     ruta_archivo: req.file.filename,
     nombre_original: req.file.originalname,
     mime_type: req.file.mimetype,
     tamano_bytes: req.file.size,
     subido_por: req.user.id,
-  })
+    estado: 'entregado',
+  }
+  const staff = esStaff(req.user)
+  const pendienteId = Number(req.body.pendiente_id)
+  const pendiente = pendienteId
+    ? await db('diagnostico_entregables').where({ id: pendienteId, diagnostico_id: d.id, estado: 'pendiente' }).first()
+    : null
+  // El cliente solo entrega las tareas asignadas a él; el equipo publica libremente
+  if (!staff && pendiente?.asignado_a !== 'cliente') {
+    unlinkSync(req.file.path)
+    return res.status(403).json({ message: 'Solo el equipo puede publicar entregables' })
+  }
+  if (pendienteId && !pendiente) {
+    unlinkSync(req.file.path)
+    return res.status(404).json({ message: 'Tarea pendiente no encontrada' })
+  }
+
+  let id
+  if (pendiente) {
+    await db('diagnostico_entregables').where('id', pendiente.id).update(archivo)
+    id = pendiente.id
+  } else {
+    ;[id] = await db('diagnostico_entregables').insert({
+      diagnostico_id: d.id,
+      titulo: (req.body.titulo || '').trim() || req.file.originalname,
+      asignado_a: 'admin',
+      ...archivo,
+    })
+  }
   res.status(201).json({ id })
 
-  notificarCliente({
-    entidad: 'diagnostico', entidadId: d.id,
-    titulo: `Documento entregado — diagnóstico "${d.nombre}"`,
-    mensaje: `El equipo te entregó "${req.body.titulo || req.file.originalname}". Ya puedes descargarlo.`,
-    url: '/admin/diagnosticos',
-    empresaId: d.empresa_id, personaId: d.persona_id,
-  })
+  const titulo = pendiente?.titulo || (req.body.titulo || '').trim() || req.file.originalname
+  if (staff) {
+    notificarCliente({
+      entidad: 'diagnostico', entidadId: d.id,
+      titulo: `Documento entregado — diagnóstico "${d.nombre}"`,
+      mensaje: `El equipo te entregó "${titulo}". Ya puedes descargarlo.`,
+      url: '/admin/diagnosticos',
+      empresaId: d.empresa_id, personaId: d.persona_id,
+    })
+  } else {
+    notificarAdmins({
+      entidad: 'diagnostico', entidadId: d.id,
+      titulo: 'Documento entregado por el cliente',
+      mensaje: `Diagnóstico "${d.nombre}": el cliente entregó "${titulo}".`,
+      url: '/admin/diagnosticos',
+      userId: req.user.id,
+    })
+  }
 }
 
 // GET /diagnosticos/entregables/:eid/download
@@ -527,8 +756,8 @@ export async function downloadEntregable(req, res) {
   const found = await findEntregable(req, res)
   if (!found) return
   const { entregable } = found
-  const filePath = resolve(STORAGE_DIR, entregable.ruta_archivo)
-  if (!entregable.ruta_archivo || !existsSync(filePath)) {
+  const filePath = entregable.ruta_archivo ? resolve(STORAGE_DIR, entregable.ruta_archivo) : null
+  if (!filePath || !existsSync(filePath)) {
     return res.status(404).json({ message: 'Archivo no disponible' })
   }
   res.setHeader('Content-Type', entregable.mime_type || 'application/octet-stream')
@@ -632,11 +861,26 @@ export async function listPreguntas(req, res) {
   res.json({ data: rows.map(p => ({ ...p, opciones: p.opciones ? JSON.parse(p.opciones) : null })) })
 }
 
+// Dependencia de una pregunta: pregunta_padre_id + mostrar_si (un solo nivel)
+async function vinculoPregunta(body, actualId) {
+  const padreId = body.pregunta_padre_id ? Number(body.pregunta_padre_id) : null
+  if (!padreId) return { pregunta_padre_id: null, mostrar_si: null }
+  if (padreId === actualId) return { error: 'Una pregunta no puede depender de sí misma' }
+  const padre = await db('diagnostico_preguntas').where('id', padreId).first()
+  if (!padre) return { error: 'La pregunta padre no existe' }
+  if (padre.pregunta_padre_id) return { error: 'Solo se permite un nivel de dependencia' }
+  const mostrarSi = body.mostrar_si === undefined || body.mostrar_si === null || body.mostrar_si === '' ? null : String(body.mostrar_si)
+  if (mostrarSi === null) return { error: 'Indica la respuesta que activa la pregunta' }
+  return { pregunta_padre_id: padreId, mostrar_si: mostrarSi }
+}
+
 export async function createPregunta(req, res) {
   const { titulo, slug, descripcion, tipo_respuesta, opciones, es_obligatoria, ayuda_contextual, orden, activo } = req.body
   if (!titulo || !TIPOS_RESPUESTA.includes(tipo_respuesta)) {
     return res.status(400).json({ message: 'Título y tipo de respuesta válidos son obligatorios' })
   }
+  const vinculo = await vinculoPregunta(req.body, null)
+  if (vinculo.error) return res.status(400).json({ message: vinculo.error })
   const [id] = await db('diagnostico_preguntas').insert({
     slug: slug || titulo.toLowerCase().replace(/[^a-z0-9áéíóúñ]+/gi, '-').slice(0, 100),
     titulo, descripcion: descripcion || null, tipo_respuesta,
@@ -644,6 +888,7 @@ export async function createPregunta(req, res) {
     es_obligatoria: !!es_obligatoria,
     ayuda_contextual: ayuda_contextual || null,
     orden: Number(orden) || 99, activo: activo !== undefined ? !!activo : true,
+    ...vinculo,
   })
   res.status(201).json({ id })
 }
@@ -652,7 +897,12 @@ export async function updatePregunta(req, res) {
   const p = await db('diagnostico_preguntas').where('id', req.params.id).first()
   if (!p) return res.status(404).json({ message: 'Pregunta no encontrada' })
   const { titulo, descripcion, tipo_respuesta, opciones, es_obligatoria, ayuda_contextual, orden, activo } = req.body
+  const vinculo = req.body.pregunta_padre_id !== undefined || req.body.mostrar_si !== undefined
+    ? await vinculoPregunta(req.body, p.id)
+    : {}
+  if (vinculo.error) return res.status(400).json({ message: vinculo.error })
   await db('diagnostico_preguntas').where('id', p.id).update({
+    ...vinculo,
     titulo: titulo ?? p.titulo,
     descripcion: descripcion !== undefined ? descripcion : p.descripcion,
     tipo_respuesta: TIPOS_RESPUESTA.includes(tipo_respuesta) ? tipo_respuesta : p.tipo_respuesta,

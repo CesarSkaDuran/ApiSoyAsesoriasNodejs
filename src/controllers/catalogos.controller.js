@@ -3,7 +3,7 @@ import db from '../db/knex.js'
 // GET /catalogos - todos los catalogos en una sola llamada (para formularios)
 export async function all(req, res) {
   const [departamentos, ciudades, eps, arl, pensiones, cajas, bancos, cargos, servicios, actividades,
-    listaGastos, terceros, sucursales] =
+    listaGastos, terceros, sucursales, mediosPago] =
     await Promise.all([
       db('departamentos').orderBy('nombre'),
       db('ciudades').orderBy('nombre'),
@@ -18,12 +18,13 @@ export async function all(req, res) {
       db('lista_gastos').orderBy('nombre'),
       db('terceros').orderBy('nombre').limit(500),
       db('sucursales').orderBy('nombre'),
+      db('medios_pago').where('activo', true).orderBy('orden').orderBy('nombre'),
     ])
 
   res.json({
     departamentos, ciudades, eps, arl, pensiones,
     cajas_compensacion: cajas, bancos, cargos, servicios,
     actividades_economicas: actividades,
-    lista_gastos: listaGastos, terceros, sucursales,
+    lista_gastos: listaGastos, terceros, sucursales, medios_pago: mediosPago,
   })
 }

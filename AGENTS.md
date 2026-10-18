@@ -56,7 +56,7 @@
 
 ## Swagger / OpenAPI
 
-- Interfaz: `/api-docs`; especificación JSON: `/api-docs.json`.
+- Interfaz: `/swagger/`; especificación JSON: `/swagger.json`.
 - La definición está en `src/docs/openapi.js`; al agregar o cambiar rutas,
   actualizar también su inventario OpenAPI.
 - Endpoints protegidos documentan Bearer JWT; captación de leads usa
@@ -64,3 +64,26 @@
 - `SWAGGER_ENABLED=false` desactiva la documentación.
 - Mantener `src/index.js` sin top-level await: el cargador Passenger/LiteSpeed
   requiere la entrada y no soporta módulos ESM con top-level await.
+
+## Reinicio de producción (cPanel / LiteSpeed)
+
+- La API de producción corre como `lsnode` en `/home/soyaseso/soyasesorias-api-app/`.
+  Después de subir cambios del API, identifica sus procesos:
+
+  ```bash
+  ps -u "$USER" -o pid,etime,cmd | grep -E '[n]ode|[p]m2|[p]assenger'
+  ```
+
+- Termina **solo** los PID cuya línea sea
+  `lsnode:/home/soyaseso/soyasesorias-api-app/` (puede haber más de uno):
+
+  ```bash
+  kill -TERM <PID1> <PID2>
+  ```
+
+- LiteSpeed vuelve a levantar la aplicación al recibir la siguiente petición.
+  Confirma que aparezca un PID nuevo con el mismo `ps`. No reutilices PID de
+  reinicios anteriores y no uses `killall node`/`pkill node`, porque podrías
+  detener otras aplicaciones del servidor.
+- `npm start` ejecuta las migraciones antes de escuchar; revisa el log de
+  cPanel/LiteSpeed tras el reinicio para confirmar que terminaron correctamente.

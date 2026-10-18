@@ -20,6 +20,11 @@ test('Swagger expone la especificación OpenAPI y la interfaz web', async (t) =>
   assert.equal(spec.openapi, '3.0.3')
   assert.ok(spec.paths['/api/auth/login']?.post)
   assert.ok(spec.paths['/api/nominas/{id}/liquidar']?.put)
+  assert.ok(spec.paths['/api/pagos/cartera']?.get)
+  assert.ok(spec.paths['/api/pagos/{id}/abonos']?.post)
+  assert.ok(spec.paths['/api/pagos/abonos/{aid}/anular']?.put)
+  assert.ok(spec.paths['/api/pagos/comprobantes/{cid}/verificar']?.put)
+  assert.ok(spec.components.schemas.RegistrarAbonoRequest)
   assert.ok(spec.components.securitySchemes.bearerAuth)
 
   const uiResponse = await fetch(`${baseUrl}/swagger/`)

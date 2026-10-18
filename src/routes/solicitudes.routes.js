@@ -1,15 +1,19 @@
 import { Router } from 'express'
-import { authMiddleware, requireModulo } from '../middlewares/auth.js'
+import { authMiddleware, requireRole, requireModulo } from '../middlewares/auth.js'
 import { upload } from '../middlewares/upload.js'
 import {
   list as listSolicitudes, show as showSolicitud,
   create as createSolicitud, update as updateSolicitud,
   uploadRespuesta, downloadRespuesta, deleteRespuesta,
+  listPlantillasRRHH, savePlantillaRRHH, generarDocumentoRRHH,
 } from '../controllers/solicitudes.controller.js'
 
 const router = Router()
 
 router.get('/', authMiddleware, requireModulo('solicitudes'), listSolicitudes)
+router.get('/plantillas-rrhh', authMiddleware, requireRole('admin', 'asesor', 'empresa'), requireModulo('solicitudes'), listPlantillasRRHH)
+router.put('/plantillas-rrhh', authMiddleware, requireRole('admin', 'asesor', 'empresa'), requireModulo('solicitudes'), savePlantillaRRHH)
+router.post('/:id/generar-documento-rrhh', authMiddleware, requireRole('admin', 'asesor', 'empresa'), requireModulo('solicitudes'), generarDocumentoRRHH)
 router.get('/:id', authMiddleware, requireModulo('solicitudes'), showSolicitud)
 router.post('/', authMiddleware, requireModulo('solicitudes'), createSolicitud)
 router.put('/:id', authMiddleware, requireModulo('solicitudes'), updateSolicitud)

@@ -6,6 +6,7 @@ import {
   update as updateEmpleado, remove as removeEmpleado, retirarLote, recontratar,
   addBeneficiario, removeBeneficiario,
   addIncapacidad, updateIncapacidad, removeIncapacidad, uploadFoto, getFoto,
+  createTrabajadorUser, updateTrabajadorUser,
 } from '../controllers/empleados.controller.js'
 
 const router = Router()
@@ -14,6 +15,8 @@ router.get('/', authMiddleware, requireModulo('empleados'), listEmpleados)
 router.post('/retirar-lote', authMiddleware, requireRole('admin', 'asesor'), requireModulo('empleados'), retirarLote)
 router.post('/:id/recontratar', authMiddleware, requireRole('admin', 'asesor'), requireModulo('empleados'), recontratar)
 router.get('/:id', authMiddleware, requireModulo('empleados'), showEmpleado)
+router.post('/:id/portal-user', authMiddleware, requireRole('admin', 'asesor', 'empresa'), requireModulo('empleados'), createTrabajadorUser)
+router.put('/:id/portal-user', authMiddleware, requireRole('admin', 'asesor', 'empresa'), requireModulo('empleados'), updateTrabajadorUser)
 router.post('/contratar', authMiddleware, requireRole('admin', 'asesor', 'empresa'), scopeEmpresa(), contratar)
 router.post('/', authMiddleware, requireRole('admin', 'asesor', 'empresa'), scopeEmpresa(), createEmpleado)
 router.put('/:id', authMiddleware, requireModulo('empleados'), updateEmpleado)

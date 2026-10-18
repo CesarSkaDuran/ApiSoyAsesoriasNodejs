@@ -7,7 +7,7 @@ import {
 const router = Router()
 
 // Resumen del cliente logueado (empresa/independiente) — autenticado, scoped por tenant
-router.get('/mi-resumen', authMiddleware, miResumen)
+router.get('/mi-resumen', authMiddleware, requireRole('empresa', 'independiente'), miResumen)
 
 router.use(authMiddleware, requireRole('admin', 'asesor'), requireModulo('informes'))
 router.get('/resumen', resumen)

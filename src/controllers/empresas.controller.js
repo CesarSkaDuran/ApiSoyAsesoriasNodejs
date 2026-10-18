@@ -1,5 +1,7 @@
 import db from '../db/knex.js'
 import { canAccessEmpresa, esStaff } from '../middlewares/auth.js'
+import { createReadStream, unlinkSync } from 'fs'
+import { IMAGE_MIMES, rutaStorage } from '../services/branding.js'
 
 const CAMPOS = [
   'razon_social', 'tipo_documento', 'num_documento', 'dv', 'tipo_empresa',
@@ -95,6 +97,56 @@ export async function create(req, res) {
   const [id] = await db('empresas').insert(data)
   const empresa = await db('empresas').where('id', id).first()
   res.status(201).json({ empresa })
+}
+
+// Logo y firma de la empresa para sus documentos de RR. HH. Admin/asesor y la
+// empresa dueña pueden cambiarlos; solo se aceptan imágenes PNG o JPG.
+const descartarArchivos = (req) => Object.values(req.files || {}).flat().forEach(f => unlinkSync(f.path))
+
+// PUT /empresas/:id/branding (multipart: logo, firma, firma_nombre, firma_cargo)
+export async function updateBranding(req, res) {
+  const empresa = await db('empresas').where('id', req.params.id).first()
+  if (!empresa) {
+    descartarArchivos(req)
+    return res.status(404).json({ error: 'Empresa no encontrada' })
+  }
+  if (!canAccessEmpresa(req.user, empresa.id)) {
+    descartarArchivos(req)
+    return res.status(403).json({ error: 'Sin acceso a esta empresa' })
+  }
+  const logo = req.files?.logo?.[0]
+  const firma = req.files?.firma?.[0]
+  if ([logo, firma].some(f => f && !IMAGE_MIMES.includes(f.mimetype))) {
+    descartarArchivos(req)
+    return res.status(400).json({ error: 'El logo y la firma deben ser imágenes PNG o JPG' })
+  }
+
+  const data = {}
+  if (logo) Object.assign(data, { logo_path: logo.filename, logo_mime: logo.mimetype })
+  if (firma) Object.assign(data, { firma_path: firma.filename, firma_mime: firma.mimetype })
+  if (req.body.firma_nombre !== undefined) data.firma_nombre = String(req.body.firma_nombre).trim().slice(0, 160) || null
+  if (req.body.firma_cargo !== undefined) data.firma_cargo = String(req.body.firma_cargo).trim().slice(0, 160) || null
+  if (!Object.keys(data).length) return res.status(400).json({ error: 'Nada que actualizar' })
+
+  await db('empresas').where('id', empresa.id).update(data)
+  // Reemplazo: el archivo anterior se borra después de guardar el nuevo
+  for (const [nuevo, anterior] of [[data.logo_path, empresa.logo_path], [data.firma_path, empresa.firma_path]]) {
+    const ruta = nuevo && anterior && anterior !== nuevo ? rutaStorage(anterior) : null
+    if (ruta) unlinkSync(ruta)
+  }
+  res.json({ ok: true })
+}
+
+// GET /empresas/:id/branding/:tipo — logo o firma (autenticado)
+export async function getBrandingFile(req, res) {
+  const empresa = await db('empresas').where('id', req.params.id).first()
+  if (!empresa) return res.status(404).json({ error: 'Empresa no encontrada' })
+  if (!canAccessEmpresa(req.user, empresa.id)) return res.status(403).json({ error: 'Sin acceso a esta empresa' })
+  const tipo = req.params.tipo === 'firma' ? 'firma' : 'logo'
+  const ruta = rutaStorage(empresa[`${tipo}_path`])
+  if (!ruta) return res.status(404).json({ error: 'No hay imagen cargada' })
+  res.setHeader('Content-Type', empresa[`${tipo}_mime`] || 'image/png')
+  createReadStream(ruta).pipe(res)
 }
 
 // PUT /empresas/:id - admin edita todo; empresa solo datos de contacto

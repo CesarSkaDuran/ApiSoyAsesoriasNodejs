@@ -1,9 +1,9 @@
 import { Router } from 'express'
-import { authMiddleware } from '../middlewares/auth.js'
+import { authMiddleware, requireRole } from '../middlewares/auth.js'
 import { all as catalogos } from '../controllers/catalogos.controller.js'
 
 const router = Router()
 
-router.get('/', authMiddleware, catalogos)
+router.get('/', authMiddleware, requireRole('admin', 'asesor', 'empresa', 'independiente'), catalogos)
 
 export default router

@@ -12,7 +12,22 @@ import { notificarAdmins, notificarCliente } from './notificaciones.js'
 
 const DIAS_AVISO = 30
 
-const fmt = (f) => String(f).slice(0, 10).split('-').reverse().join('/')
+export function formatearFechaContrato(fecha) {
+  if (!fecha) return '—'
+  if (fecha instanceof Date) {
+    return `${String(fecha.getUTCDate()).padStart(2, '0')}/${String(fecha.getUTCMonth() + 1).padStart(2, '0')}/${fecha.getUTCFullYear()}`
+  }
+  const text = String(fecha).slice(0, 10)
+  const [year, month, day] = text.split('-')
+  return year && month && day ? `${day}/${month}/${year}` : text
+}
+
+export function textoVencimientoContrato(dias) {
+  const restantes = Number(dias)
+  if (restantes === 0) return 'vence hoy'
+  if (restantes === 1) return 'vence mañana'
+  return `vence en ${restantes} días`
+}
 
 export async function avisarTerminaciones() {
   const pendientes = await db('empleados')
@@ -21,6 +36,7 @@ export async function avisarTerminaciones() {
     .where('empleados.status', 'activo')
     .whereNotNull('empleados.fecha_terminacion')
     .whereNull('empleados.aviso_terminacion_at')
+    .whereRaw('empleados.fecha_terminacion >= CURDATE()')
     .whereRaw('empleados.fecha_terminacion <= DATE_ADD(CURDATE(), INTERVAL ? DAY)', [DIAS_AVISO])
     .select(
       'empleados.id', 'empleados.empresa_id',
@@ -35,10 +51,11 @@ export async function avisarTerminaciones() {
     const nombre = [e.primer_nombre, e.segundo_nombre, e.primer_apellido, e.segundo_apellido]
       .filter(Boolean).join(' ')
     const dias = Number(e.dias)
-    const cuando = dias <= 0 ? 'vence hoy' : `vence en ${dias} día(s)`
+    const cuando = textoVencimientoContrato(dias)
     const titulo = `Contrato a término fijo por vencer — ${nombre}`
-    const mensaje = `El contrato de ${nombre} (${e.numero_documento || 's/d'})${e.razon_social ? ` — ${e.razon_social}` : ''} ${cuando}, el ${fmt(e.fecha_terminacion)}.`
-    const detalle = `<b>Empleado:</b> ${nombre}<br><b>Documento:</b> ${e.numero_documento || '—'}<br><b>Empresa:</b> ${e.razon_social || '—'}<br><b>Fecha de terminación:</b> ${fmt(e.fecha_terminacion)}<br><b>Días restantes:</b> ${dias}`
+    const fecha = formatearFechaContrato(e.fecha_terminacion)
+    const mensaje = `El contrato de ${nombre} (${e.numero_documento || 's/d'})${e.razon_social ? ` — ${e.razon_social}` : ''} ${cuando}, el ${fecha}.`
+    const detalle = `<b>Empleado:</b> ${nombre}<br><b>Documento:</b> ${e.numero_documento || '—'}<br><b>Empresa:</b> ${e.razon_social || '—'}<br><b>Fecha de terminación:</b> ${fecha}<br><b>Días restantes:</b> ${dias}`
     const url = `/admin/empleados/${e.id}`
 
     // El aviso primero, la marca después: si falla la notificación, el

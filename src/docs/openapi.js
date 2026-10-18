@@ -16,6 +16,8 @@ const endpoints = [
   ['Empresas', 'delete', '/api/empresas/{id}/servicios/{servicioId}', 'Retirar servicio de empresa'],
   ['Empleados', 'get', '/api/empleados', 'Listar empleados'],
   ['Empleados', 'get', '/api/empleados/{id}', 'Consultar empleado'],
+  ['Empleados', 'post', '/api/empleados/{id}/portal-user', 'Crear acceso de autoservicio del trabajador'],
+  ['Empleados', 'put', '/api/empleados/{id}/portal-user', 'Administrar acceso de autoservicio del trabajador'],
   ['Empleados', 'post', '/api/empleados', 'Crear empleado'],
   ['Empleados', 'put', '/api/empleados/{id}', 'Actualizar empleado'],
   ['Empleados', 'delete', '/api/empleados/{id}', 'Eliminar empleado'],
@@ -45,17 +47,32 @@ const endpoints = [
   ['Documentos', 'get', '/api/documentos/{id}/download', 'Descargar documento', { download: true }],
   ['Documentos', 'delete', '/api/documentos/{id}', 'Eliminar documento'],
   ['Pagos', 'get', '/api/pagos', 'Listar pagos'],
+  ['Pagos', 'get', '/api/pagos/cartera', 'Listar cuentas pendientes con saldo, vencimiento y antigüedad', {
+    query: [{ name: 'empresa_id', type: 'integer', description: 'Filtrar por empresa (solo admin/asesor).' }],
+  }],
   ['Pagos', 'get', '/api/pagos/{id}', 'Consultar pago'],
-  ['Pagos', 'post', '/api/pagos', 'Registrar pago'],
+  ['Pagos', 'post', '/api/pagos', 'Registrar cuenta de cobro (contado o crédito)', { body: 'CrearCuentaCobroRequest' }],
   ['Pagos', 'put', '/api/pagos/{id}', 'Actualizar pago'],
+  ['Pagos', 'get', '/api/pagos/{id}/abonos', 'Consultar abonos e historial de una cuenta'],
+  ['Pagos', 'post', '/api/pagos/{id}/abonos', 'Registrar un abono parcial o total', { body: 'RegistrarAbonoRequest' }],
+  ['Pagos', 'put', '/api/pagos/abonos/{aid}/anular', 'Anular un abono sin eliminar el historial', { body: 'AnularAbonoRequest' }],
+  ['Pagos', 'get', '/api/pagos/{id}/comprobantes', 'Consultar comprobantes de pago de una cuenta'],
+  ['Pagos', 'post', '/api/pagos/{id}/comprobantes', 'Subir comprobante de pago', { multipart: 'archivo' }],
+  ['Pagos', 'get', '/api/pagos/comprobantes/{cid}/download', 'Descargar comprobante de pago', { download: true }],
+  ['Pagos', 'put', '/api/pagos/comprobantes/{cid}/verificar', 'Aprobar o rechazar un comprobante', { body: 'VerificarComprobanteRequest' }],
   ['Planillas', 'get', '/api/planillas', 'Listar planillas'],
   ['Planillas', 'get', '/api/planillas/{id}', 'Consultar planilla'],
   ['Planillas', 'post', '/api/planillas', 'Crear planilla'],
   ['Planillas', 'put', '/api/planillas/{id}', 'Actualizar planilla'],
   ['Solicitudes', 'get', '/api/solicitudes', 'Listar solicitudes'],
   ['Solicitudes', 'get', '/api/solicitudes/{id}', 'Consultar solicitud'],
-  ['Solicitudes', 'post', '/api/solicitudes', 'Crear solicitud'],
+  ['Solicitudes', 'post', '/api/solicitudes', 'Crear solicitud de servicio o solicitud de Recursos Humanos (certificado laboral/vacaciones)'],
   ['Solicitudes', 'put', '/api/solicitudes/{id}', 'Actualizar solicitud'],
+  ['Empresas', 'put', '/api/empresas/{id}/branding', 'Guardar logo, firma y datos de firma de la empresa para documentos de RR. HH.', { multipart: 'logo' }],
+  ['Empresas', 'get', '/api/empresas/{id}/branding/{tipo}', 'Consultar logo o firma de la empresa', { download: true }],
+  ['Solicitudes', 'get', '/api/solicitudes/plantillas-rrhh', 'Consultar plantillas estándar y personalizadas de Recursos Humanos'],
+  ['Solicitudes', 'put', '/api/solicitudes/plantillas-rrhh', 'Guardar plantilla de Recursos Humanos para una empresa'],
+  ['Solicitudes', 'post', '/api/solicitudes/{id}/generar-documento-rrhh', 'Generar y adjuntar certificado laboral o respuesta de vacaciones'],
   ['Solicitudes', 'put', '/api/solicitudes/{id}/respuesta', 'Cargar respuesta a solicitud', { multipart: 'file' }],
   ['Solicitudes', 'get', '/api/solicitudes/{id}/respuesta', 'Descargar respuesta de solicitud', { download: true }],
   ['Solicitudes', 'delete', '/api/solicitudes/{id}/respuesta', 'Eliminar respuesta de solicitud'],
@@ -179,6 +196,45 @@ const schemas = {
       modulos: { type: 'object', additionalProperties: { type: 'boolean' } },
     },
   },
+  CrearCuentaCobroRequest: {
+    type: 'object',
+    description: 'Incluye empresa_id, persona_id o tercero_id para asociar la cuenta. Si forma_pago es credito, fecha_vencimiento es obligatoria.',
+    properties: {
+      empresa_id: { type: 'integer', nullable: true },
+      persona_id: { type: 'integer', nullable: true },
+      tercero_id: { type: 'integer', nullable: true },
+      nombre: { type: 'string' },
+      fecha: { type: 'string', format: 'date' },
+      valor_total: { type: 'number', minimum: 0 },
+      forma_pago: { type: 'string', enum: ['contado', 'credito'], default: 'contado' },
+      fecha_vencimiento: { type: 'string', format: 'date', description: 'Obligatoria cuando forma_pago=credito.' },
+      obs: { type: 'string' },
+    },
+  },
+  RegistrarAbonoRequest: {
+    type: 'object',
+    required: ['valor', 'medio_pago_id'],
+    properties: {
+      valor: { type: 'number', minimum: 0, exclusiveMinimum: true, description: 'Debe ser mayor que cero y no puede superar el saldo pendiente.' },
+      medio_pago_id: { type: 'integer' },
+      fecha: { type: 'string', format: 'date' },
+      obs: { type: 'string' },
+    },
+  },
+  AnularAbonoRequest: {
+    type: 'object',
+    required: ['motivo'],
+    properties: { motivo: { type: 'string', minLength: 1 } },
+  },
+  VerificarComprobanteRequest: {
+    type: 'object',
+    required: ['accion'],
+    properties: {
+      accion: { type: 'string', enum: ['aprobar', 'rechazar'] },
+      medio_pago_id: { type: 'integer', description: 'Obligatorio para aprobar.' },
+      motivo: { type: 'string', description: 'Obligatorio para rechazar.' },
+    },
+  },
 }
 
 const genericObject = { type: 'object', additionalProperties: true }
@@ -192,12 +248,16 @@ function operationId(method, path) {
 }
 
 function buildOperation([tag, method, path, summary, options = {}]) {
-  const parameters = [...path.matchAll(/\{([^}]+)\}/g)].map(([, name]) => ({
+  const pathParameters = [...path.matchAll(/\{([^}]+)\}/g)].map(([, name]) => ({
     name,
     in: 'path',
     required: true,
     schema: { type: ['slug', 'catalogo', 'vigencia'].includes(name) ? 'string' : 'integer' },
   }))
+  const queryParameters = (options.query || []).map(({ name, type = 'string', required = false, description }) => ({
+    name, in: 'query', required, schema: { type }, ...(description ? { description } : {}),
+  }))
+  const parameters = [...pathParameters, ...queryParameters]
   const responses = {
     200: { description: 'Solicitud procesada correctamente.' },
     400: { description: 'Solicitud inválida.', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },

@@ -31,6 +31,16 @@ export async function authMiddleware(req, res, next) {
     } else if (user.role === 'independiente') {
       const persona = await db('personas').select('id').where('user_id', user.id).first()
       user.persona_id = persona ? persona.id : null
+    } else if (user.role === 'trabajador') {
+      const empleado = await db('empleados')
+        .select('id', 'empresa_id', 'status')
+        .where('user_id', user.id)
+        .first()
+      if (!empleado || empleado.status !== 'activo') {
+        return res.status(403).json({ error: 'No hay un vínculo laboral activo asociado a este usuario' })
+      }
+      user.empleado_id = empleado.id
+      user.empresa_id = empleado.empresa_id
     }
 
     user.modulos = await db('user_modulos').where('user_id', user.id).first() || {}
@@ -69,6 +79,10 @@ export function esStaff(user) {
 export function requireModulo(modulo) {
   return (req, res, next) => {
     if (req.user.role === 'admin') return next()
+    if (req.user.role === 'trabajador') {
+      if (modulo === 'solicitudes') return next()
+      return res.status(403).json({ error: 'Este módulo no está disponible en el portal del trabajador' })
+    }
     const modulos = req.user.modulos || {}
     const configurado = Object.keys(modulos).some(k => k !== 'id' && k !== 'user_id' && k !== 'created_at' && k !== 'updated_at')
     if (req.user.role === 'asesor' || configurado) {
@@ -109,4 +123,10 @@ export function scopeEmpresa(paramName = 'empresaId') {
 export function canAccessEmpresa(user, empresaId) {
   if (user.role === 'admin' || user.role === 'asesor') return true
   return user.empresa_id === Number(empresaId)
+}
+
+export function canAccessEmpleado(user, empleado) {
+  if (esStaff(user)) return true
+  if (user.role === 'empresa') return Number(user.empresa_id) === Number(empleado.empresa_id)
+  return user.role === 'trabajador' && Number(user.empleado_id) === Number(empleado.id)
 }

@@ -38,13 +38,35 @@ async function buildUserPayload(user) {
     empresa = await db('empresas').where('user_id', user.id).first()
   } else if (user.role === 'independiente') {
     persona = await db('personas').where('user_id', user.id).first()
+  } else if (user.role === 'trabajador') {
+    const empleado = await db('empleados as e')
+      .leftJoin('empresas as em', 'em.id', 'e.empresa_id')
+      .where('e.user_id', user.id)
+      .select(
+        'e.id', 'e.empresa_id', 'e.primer_nombre', 'e.segundo_nombre',
+        'e.primer_apellido', 'e.segundo_apellido', 'e.numero_documento',
+        'e.cargo_id', 'e.status', 'em.razon_social as empresa_nombre',
+      )
+      .first()
+    if (empleado) {
+      user.trabajador = empleado
+      user.empresa_id = empleado.empresa_id
+    }
   }
   const modulos = await db('user_modulos').where('user_id', user.id).first() || {}
   const { password: _, ...userSafe } = user
   // Consentimiento vigente (aceptacion exacta de la version actual)
   const terminos_aceptados = !!user.terminos_aceptados_en
     && user.terminos_version === TERMINOS_VERSION
-  return { ...userSafe, empresa, persona, modulos, terminos_aceptados, terminos_version_actual: TERMINOS_VERSION }
+  return {
+    ...userSafe,
+    empresa,
+    persona,
+    trabajador: user.trabajador ?? null,
+    modulos,
+    terminos_aceptados,
+    terminos_version_actual: TERMINOS_VERSION,
+  }
 }
 
 export async function login(req, res) {

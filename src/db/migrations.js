@@ -1742,6 +1742,173 @@ export async function runMigrations() {
     console.log('  + diagnostico_entregables')
   }
 
+  // Tareas pendientes en entregables: una respuesta "No" a una pregunta
+  // con documento_nombre crea un entregable pendiente (sin archivo) que el
+  // staff completa al subir el documento.
+  if (await db.schema.hasTable('diagnostico_entregables')) {
+    if (!await db.schema.hasColumn('diagnostico_entregables', 'estado')) {
+      await db.schema.alterTable('diagnostico_entregables', t => {
+        t.string('estado', 20).notNullable().defaultTo('entregado')
+      })
+      console.log('  + diagnostico_entregables.estado')
+    }
+    if (!await db.schema.hasColumn('diagnostico_entregables', 'asignado_a')) {
+      await db.schema.alterTable('diagnostico_entregables', t => {
+        t.string('asignado_a', 10).notNullable().defaultTo('admin')
+      })
+      console.log('  + diagnostico_entregables.asignado_a')
+    }
+    const { Null } = (await db.raw("SHOW COLUMNS FROM diagnostico_entregables LIKE 'ruta_archivo'"))[0][0] || {}
+    if (Null === 'NO') {
+      await db.raw('ALTER TABLE diagnostico_entregables MODIFY COLUMN ruta_archivo VARCHAR(255) NULL')
+      console.log('  ~ diagnostico_entregables.ruta_archivo nullable')
+    }
+  }
+  // Parámetros del módulo de diagnósticos (tarifa por hora para cotizar
+  // entregables) y cotización de entregables / vínculo al cobro generado.
+  if (!await db.schema.hasTable('diagnostico_parametros')) {
+    await db.schema.createTable('diagnostico_parametros', t => {
+      t.string('clave', 60).primary()
+      t.string('valor', 255).notNullable()
+      t.timestamp('updated_at').defaultTo(db.fn.now())
+    })
+    await db('diagnostico_parametros').insert({ clave: 'tarifa_hora', valor: '0' })
+    console.log('  + diagnostico_parametros')
+  }
+  if (await db.schema.hasTable('diagnostico_entregables')) {
+    const cols = await db.schema.hasColumn('diagnostico_entregables', 'horas')
+    if (!cols) {
+      await db.schema.alterTable('diagnostico_entregables', t => {
+        t.decimal('horas', 8, 2).nullable()
+        t.decimal('valor_hora', 12, 2).nullable()
+        t.decimal('valor', 14, 2).nullable()
+      })
+      console.log('  + diagnostico_entregables.horas/valor_hora/valor')
+    }
+    if (!await db.schema.hasColumn('diagnostico_entregables', 'descuento')) {
+      await db.schema.alterTable('diagnostico_entregables', t => {
+        t.decimal('descuento', 14, 2).notNullable().defaultTo(0)
+      })
+      console.log('  + diagnostico_entregables.descuento')
+    }
+  }
+  // Las líneas de cobro por horas necesitan cantidad fraccionaria (2.5 h).
+  if (await db.schema.hasTable('detalle_cobro')) {
+    const [cant] = await db.raw("SHOW COLUMNS FROM detalle_cobro LIKE 'cantidad'")
+    if (cant[0] && cant[0].Type.startsWith('int')) {
+      await db.raw('ALTER TABLE detalle_cobro MODIFY COLUMN cantidad DECIMAL(10,2) NULL DEFAULT 1')
+      console.log('  ~ detalle_cobro.cantidad -> DECIMAL(10,2)')
+    }
+  }
+  if (await db.schema.hasTable('diagnosticos') && !await db.schema.hasColumn('diagnosticos', 'descuento_total')) {
+    await db.schema.alterTable('diagnosticos', t => {
+      t.decimal('descuento_total', 14, 2).notNullable().defaultTo(0)
+    })
+    console.log('  + diagnosticos.descuento_total')
+  }
+  if (await db.schema.hasTable('diagnosticos') && !await db.schema.hasColumn('diagnosticos', 'cuenta_cobro_id')) {
+    await db.schema.alterTable('diagnosticos', t => {
+      t.integer('cuenta_cobro_id').unsigned().nullable()
+    })
+    console.log('  + diagnosticos.cuenta_cobro_id')
+  }
+  // Medios de pago (catálogo configurable) y comprobantes de pago ligados a
+  // la cuenta de cobro. El cliente sube el comprobante; el admin lo verifica
+  // y al aprobarlo marca la cuenta como pagada con su medio de pago.
+  if (!await db.schema.hasTable('medios_pago')) {
+    await db.schema.createTable('medios_pago', t => {
+      t.increments('id')
+      t.string('nombre', 100).notNullable()
+      t.integer('orden').defaultTo(99)
+      t.boolean('activo').defaultTo(true)
+      t.timestamps(true, true)
+    })
+    await db('medios_pago').insert([
+      { nombre: 'Transferencia bancaria', orden: 1 },
+      { nombre: 'Nequi', orden: 2 },
+      { nombre: 'Daviplata', orden: 3 },
+      { nombre: 'PSE', orden: 4 },
+      { nombre: 'Efectivo', orden: 5 },
+      { nombre: 'Otro', orden: 6 },
+    ])
+    console.log('  + medios_pago')
+  }
+  if (await db.schema.hasTable('cuentas_cobro') && !await db.schema.hasColumn('cuentas_cobro', 'medio_pago_id')) {
+    await db.schema.alterTable('cuentas_cobro', t => {
+      t.integer('medio_pago_id').unsigned().nullable()
+    })
+    console.log('  + cuentas_cobro.medio_pago_id')
+  }
+  if (!await db.schema.hasTable('cuenta_cobro_comprobantes')) {
+    if (await db.schema.hasTable('diagnostico_comprobantes')) {
+      await db.schema.renameTable('diagnostico_comprobantes', 'cuenta_cobro_comprobantes')
+      await db.raw('ALTER TABLE cuenta_cobro_comprobantes MODIFY COLUMN diagnostico_id INT UNSIGNED NULL')
+      console.log('  ~ diagnostico_comprobantes -> cuenta_cobro_comprobantes')
+    } else {
+      await db.schema.createTable('cuenta_cobro_comprobantes', t => {
+        t.increments('id')
+        t.integer('cuenta_cobro_id').unsigned().notNullable().index()
+        t.string('ruta_archivo', 255).notNullable()
+        t.string('nombre_original', 255).nullable()
+        t.string('mime_type', 120).nullable()
+        t.integer('tamano_bytes').unsigned().nullable()
+        t.string('estado', 20).notNullable().defaultTo('pendiente')
+        t.text('motivo').nullable()
+        t.integer('subido_por').unsigned().nullable()
+        t.integer('verificado_por').unsigned().nullable()
+        t.timestamp('verificado_at').nullable()
+        t.timestamps(true, true)
+      })
+      console.log('  + cuenta_cobro_comprobantes')
+    }
+  }
+  // Cartera: cobros de contado o a crédito (con vencimiento) y abonos parciales.
+  // El saldo es valor_total − abonos activos; los abonos se anulan, no se borran.
+  if (await db.schema.hasTable('cuentas_cobro') && !await db.schema.hasColumn('cuentas_cobro', 'forma_pago')) {
+    await db.schema.alterTable('cuentas_cobro', t => {
+      t.string('forma_pago', 10).notNullable().defaultTo('contado')
+      t.date('fecha_vencimiento').nullable()
+    })
+    console.log('  + cuentas_cobro.forma_pago / fecha_vencimiento')
+  }
+  if (!await db.schema.hasTable('cuenta_cobro_abonos')) {
+    await db.schema.createTable('cuenta_cobro_abonos', t => {
+      t.increments('id')
+      t.integer('cuenta_cobro_id').unsigned().notNullable().index()
+      t.decimal('valor', 14, 2).notNullable()
+      t.date('fecha').notNullable()
+      t.integer('medio_pago_id').unsigned().nullable()
+      t.text('obs').nullable()
+      t.boolean('anulado').notNullable().defaultTo(false)
+      t.text('anulado_motivo').nullable()
+      t.integer('registrado_por').unsigned().nullable()
+      t.timestamps(true, true)
+    })
+    console.log('  + cuenta_cobro_abonos')
+  }
+
+  // Preguntas enlazadas: una pregunta hija aparece solo cuando la respuesta
+  // de su padre coincide con mostrar_si. Comentario opcional por respuesta.
+  if (await db.schema.hasTable('diagnostico_preguntas') && !await db.schema.hasColumn('diagnostico_preguntas', 'pregunta_padre_id')) {
+    await db.schema.alterTable('diagnostico_preguntas', t => {
+      t.integer('pregunta_padre_id').unsigned().nullable()
+      t.string('mostrar_si', 255).nullable()
+    })
+    console.log('  + diagnostico_preguntas.pregunta_padre_id / mostrar_si')
+  }
+  if (await db.schema.hasTable('diagnostico_respuestas') && !await db.schema.hasColumn('diagnostico_respuestas', 'comentario')) {
+    await db.schema.alterTable('diagnostico_respuestas', t => {
+      t.text('comentario').nullable()
+    })
+    console.log('  + diagnostico_respuestas.comentario')
+  }
+  if (await db.schema.hasTable('diagnostico_preguntas') && !await db.schema.hasColumn('diagnostico_preguntas', 'documento_nombre')) {
+    await db.schema.alterTable('diagnostico_preguntas', t => {
+      t.string('documento_nombre', 200).nullable()
+    })
+    console.log('  + diagnostico_preguntas.documento_nombre')
+  }
+
   // Catálogo de documentos obligatorios por empresa (checklist del módulo
   // de Documentos). Parametrizable como maestro; tipo_id enlaza con
   // documento_tipos para saber qué upload cubre el requisito.
@@ -1808,11 +1975,12 @@ export async function runMigrations() {
 
   // Fin de contrato a término fijo + marca del aviso de 30 días ya enviado
   if (!await db.schema.hasColumn('empleados', 'fecha_terminacion')) {
-    await db.schema.table('empleados', t => {
-      t.date('fecha_terminacion').nullable()
-      t.timestamp('aviso_terminacion_at').nullable()
-    })
-    console.log('  + empleados.fecha_terminacion / aviso_terminacion_at')
+    await db.schema.table('empleados', t => t.date('fecha_terminacion').nullable())
+    console.log('  + empleados.fecha_terminacion')
+  }
+  if (!await db.schema.hasColumn('empleados', 'aviso_terminacion_at')) {
+    await db.schema.table('empleados', t => t.timestamp('aviso_terminacion_at').nullable())
+    console.log('  + empleados.aviso_terminacion_at')
   }
 
   // Rol 'asesor': staff interno multi-empresa limitado por user_modulos.
@@ -1860,6 +2028,166 @@ export async function runMigrations() {
       }
       await db('migraciones_log').insert({ nombre: 'baseline_modulos_clientes' })
       console.log(`  ~ baseline modulos clientes (${clientes.length})`)
+    }
+  }
+
+  // Documento que sustenta cada pregunta de entrevista (genera tarea
+  // pendiente en entregables cuando la respuesta es "No"). Backfill de
+  // una sola corrida para bases ya sembradas.
+  {
+    const ya = await db('migraciones_log').where('nombre', 'pregunta_documento_nombre').first()
+    if (!ya) {
+      const DOCS = {
+        'contratos-laborales-firmados': 'Contratos laborales firmados',
+        'manual-de-funciones': 'Manual de funciones',
+        'reglamento-politicas-internas': 'Reglamento interno de trabajo y políticas',
+      }
+      for (const [slug, nombre] of Object.entries(DOCS)) {
+        await db('diagnostico_preguntas').where('slug', slug).whereNull('documento_nombre').update({ documento_nombre: nombre })
+      }
+      await db('migraciones_log').insert({ nombre: 'pregunta_documento_nombre' })
+      console.log('  ~ preguntas con documento_nombre (backfill)')
+    }
+  }
+
+  {
+    const ya = await db('migraciones_log').where('nombre', 'pregunta_documento_rrhh').first()
+    if (!ya) {
+      await db('diagnostico_preguntas').where('slug', 'tienen-encargado-rh').whereNull('documento_nombre')
+        .update({ documento_nombre: 'Soporte del encargado de RRHH' })
+      await db('migraciones_log').insert({ nombre: 'pregunta_documento_rrhh' })
+      console.log('  ~ pregunta encargado RRHH con documento_nombre')
+    }
+  }
+
+  if (await db.schema.hasTable('diagnostico_preguntas')) {
+    const ya = await db('migraciones_log').where('nombre', 'ejemplo_preguntas_enlazadas').first()
+    if (!ya && !await db('diagnostico_preguntas').where('slug', 'tiene-contratistas').first()) {
+      const [{ n }] = await db('diagnostico_preguntas').max('orden as n')
+      const [padreId] = await db('diagnostico_preguntas').insert({
+        slug: 'tiene-contratistas', titulo: '¿Tiene contratistas?', tipo_respuesta: 'booleano',
+        descripcion: 'Identifica si la empresa contrata personas por prestación de servicios.',
+        ayuda_contextual: 'Responde Sí o No. Si es Sí, se mostrará la pregunta para indicar el tipo de contratistas.',
+        es_obligatoria: false, orden: Number(n || 0) + 1, activo: true,
+      })
+      await db('diagnostico_preguntas').insert({
+        slug: 'tipo-contratistas', titulo: '¿Qué tipo de contratistas tiene?', tipo_respuesta: 'multiple',
+        opciones: JSON.stringify(['Prestación de servicios personales', 'Outsourcing', 'Servicios temporales', 'Otro']),
+        descripcion: 'Permite dimensionar la contratación por prestación de servicios.',
+        ayuda_contextual: 'Selecciona todas las que apliquen.',
+        es_obligatoria: false, orden: Number(n || 0) + 2, activo: true,
+        pregunta_padre_id: padreId, mostrar_si: '1',
+      })
+      console.log('  + preguntas enlazadas de ejemplo (contratistas)')
+    }
+    if (!ya) await db('migraciones_log').insert({ nombre: 'ejemplo_preguntas_enlazadas' })
+  }
+
+  if (await db.schema.hasTable('cuentas_cobro')) {
+    const ya = await db('migraciones_log').where('nombre', 'abonos_historicos_pagadas').first()
+    if (!ya) {
+      const pagadas = await db('cuentas_cobro').where('status', 1).select('id', 'valor_total', 'medio_pago_id', 'fecha')
+      for (const c of pagadas) {
+        await db('cuenta_cobro_abonos').insert({
+          cuenta_cobro_id: c.id, valor: c.valor_total, fecha: c.fecha || db.fn.now(),
+          medio_pago_id: c.medio_pago_id || null, obs: 'Pago total (histórico)',
+        })
+      }
+      await db('migraciones_log').insert({ nombre: 'abonos_historicos_pagadas' })
+      if (pagadas.length) console.log(`  ~ abonos históricos para ${pagadas.length} cuenta(s) pagada(s)`)
+    }
+  }
+
+  // Perfil de autoservicio para trabajadores de empresas.
+  // El trabajador queda vinculado a un empleado concreto, no a la empresa
+  // completa, y solo puede operar sobre sus propias solicitudes.
+  const [roleWorkerCol] = await db.raw("SHOW COLUMNS FROM users LIKE 'role'")
+  if (roleWorkerCol[0] && !roleWorkerCol[0].Type.includes('trabajador')) {
+    await db.raw("ALTER TABLE users MODIFY COLUMN role ENUM('admin','empresa','independiente','asesor','trabajador') NULL DEFAULT 'empresa'")
+    console.log('  ~ users.role +trabajador')
+  }
+  if (await db.schema.hasTable('empleados') && !await db.schema.hasColumn('empleados', 'user_id')) {
+    await db.schema.alterTable('empleados', t => {
+      t.integer('user_id').unsigned().nullable().unique()
+    })
+    console.log('  + empleados.user_id')
+  }
+  if (await db.schema.hasTable('empleados') && await db.schema.hasColumn('empleados', 'user_id')) {
+    const [workerUserIndex] = await db.raw("SHOW INDEX FROM empleados WHERE Key_name = 'empleados_user_id_unique'")
+    if (!workerUserIndex.length) {
+      await db.schema.alterTable('empleados', t => t.unique(['user_id'], 'empleados_user_id_unique'))
+      console.log('  + UNIQUE empleados.user_id')
+    }
+  }
+  if (await db.schema.hasTable('solicitudes')) {
+    if (!await db.schema.hasColumn('solicitudes', 'empleado_id')) {
+      await db.schema.alterTable('solicitudes', t => {
+        t.integer('empleado_id').unsigned().nullable().index()
+        t.string('tipo_solicitud', 40).notNullable().defaultTo('general')
+        t.date('fecha_inicio').nullable()
+        t.date('fecha_fin').nullable()
+      })
+      console.log('  + solicitudes employee self-service fields')
+    }
+  }
+  if (!await db.schema.hasTable('plantillas_rrhh')) {
+    await db.schema.createTable('plantillas_rrhh', t => {
+      t.increments('id')
+      t.integer('empresa_id').unsigned().nullable().index()
+      t.string('tipo', 40).notNullable()
+      t.string('titulo', 160).notNullable()
+      t.text('contenido').notNullable()
+      t.integer('actualizado_por').unsigned().nullable()
+      t.timestamps(true, true)
+      t.unique(['empresa_id', 'tipo'], 'plantillas_rrhh_empresa_tipo_unique')
+    })
+    console.log('  + plantillas_rrhh')
+  }
+  // Marcador {{firma}}: la firma guardada por la empresa se inserta ahí. Si
+  // una plantilla personalizada no lo incluye, la firma se agrega al final.
+  // Marcador {{firma}}: la firma guardada por la empresa se inserta ahí. Si
+  // una plantilla personalizada no lo incluye, la firma se agrega al final.
+  const plantillasBase = [
+    {
+      tipo: 'certificado_laboral',
+      titulo: 'Certificado laboral',
+      contenido: 'Fecha: {{fecha_emision}}\n\nA quien corresponda:\n\nCertificamos que {{trabajador.nombre}}, identificado(a) con {{trabajador.tipo_documento}} {{trabajador.documento}}, se encuentra vinculado(a) laboralmente con {{empresa.nombre}} (NIT {{empresa.nit}}) desde el {{trabajador.fecha_ingreso}}, desempeñando el cargo de {{trabajador.cargo}}.\n\nSe expide a solicitud del interesado para los fines que considere pertinentes.\n\nAtentamente,\n\n{{firma}}',
+    },
+    {
+      tipo: 'vacaciones',
+      titulo: 'Respuesta a solicitud de vacaciones',
+      contenido: 'Fecha: {{fecha_emision}}\n\nSeñor(a) {{trabajador.nombre}}\nIdentificación: {{trabajador.tipo_documento}} {{trabajador.documento}}\nCargo: {{trabajador.cargo}}\n\nEn respuesta a su solicitud, informamos que las vacaciones solicitadas desde el {{solicitud.fecha_inicio}} hasta el {{solicitud.fecha_fin}} han sido {{solicitud.estado}}.\n\n{{solicitud.observaciones}}\n\nAtentamente,\n\n{{firma}}',
+    },
+  ]
+  for (const plantilla of plantillasBase) {
+    const exists = await db('plantillas_rrhh').whereNull('empresa_id').where('tipo', plantilla.tipo).first()
+    if (!exists) {
+      await db('plantillas_rrhh').insert({ ...plantilla, empresa_id: null })
+      console.log(`  + plantilla estándar ${plantilla.tipo}`)
+    } else if (!String(exists.contenido).includes('{{firma}}')) {
+      // Estándar anterior (firma escrita a mano): se reemplaza por la versión con marcador
+      await db('plantillas_rrhh').where('id', exists.id).update({ titulo: plantilla.titulo, contenido: plantilla.contenido })
+      console.log(`  ~ plantilla estándar ${plantilla.tipo} actualizada`)
+    }
+  }
+
+  // Membrete y firma por empresa (logo y firma se guardan en storage privado)
+  if (await db.schema.hasTable('empresas')) {
+    const columnas = {
+      logo_path: t => t.string('logo_path', 255).nullable(),
+      logo_mime: t => t.string('logo_mime', 60).nullable(),
+      firma_path: t => t.string('firma_path', 255).nullable(),
+      firma_mime: t => t.string('firma_mime', 60).nullable(),
+      firma_nombre: t => t.string('firma_nombre', 160).nullable(),
+      firma_cargo: t => t.string('firma_cargo', 160).nullable(),
+    }
+    const faltantes = []
+    for (const [col, def] of Object.entries(columnas)) {
+      if (!await db.schema.hasColumn('empresas', col)) faltantes.push(def)
+    }
+    if (faltantes.length) {
+      await db.schema.alterTable('empresas', t => faltantes.forEach(def => def(t)))
+      console.log(`  + empresas: membrete y firma (${faltantes.length} columnas)`)
     }
   }
 

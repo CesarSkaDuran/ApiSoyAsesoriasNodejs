@@ -136,6 +136,16 @@ const MAESTROS = {
     fields: [txt('nombre', 'Nombre', { required: true })],
     usadoEn: [{ table: 'gastos', col: 'lista_gasto_id', label: 'gastos' }],
   },
+  medios_pago: {
+    label: 'Medios de pago', icon: 'file-text',
+    singular: 'medio de pago',
+    fields: [
+      txt('nombre', 'Nombre', { required: true }),
+      num('orden', 'Orden'),
+      bool('activo', 'Activo'),
+    ],
+    usadoEn: [{ table: 'cuentas_cobro', col: 'medio_pago_id', label: 'cuentas de cobro' }],
+  },
   documento_tipos: {
     label: 'Tipos de documento', icon: 'file-text',
     singular: 'tipo de documento',
