@@ -17,7 +17,7 @@ export async function authMiddleware(req, res, next) {
     const payload = jwt.verify(token, process.env.JWT_SECRET)
 
     const user = await db('users')
-      .select('id', 'name', 'lastname', 'email', 'role', 'is_active', 'terminos_aceptados_en', 'terminos_version')
+      .select('id', 'name', 'lastname', 'email', 'role', 'perfil_acceso', 'is_active', 'terminos_aceptados_en', 'terminos_version')
       .where('id', payload.id)
       .first()
 
@@ -26,7 +26,11 @@ export async function authMiddleware(req, res, next) {
 
     // Scope de tenant: empresa o persona (independiente) asociada al usuario
     if (user.role === 'empresa') {
-      const empresa = await db('empresas').select('id').where('user_id', user.id).first()
+      const empresa = await db('empresas as e')
+        .leftJoin('empresa_usuarios as eu', 'eu.empresa_id', 'e.id')
+        .where(q => q.where('e.user_id', user.id).orWhere('eu.user_id', user.id))
+        .select('e.id')
+        .first()
       user.empresa_id = empresa ? empresa.id : null
     } else if (user.role === 'independiente') {
       const persona = await db('personas').select('id').where('user_id', user.id).first()
@@ -43,7 +47,14 @@ export async function authMiddleware(req, res, next) {
       user.empresa_id = empleado.empresa_id
     }
 
-    user.modulos = await db('user_modulos').where('user_id', user.id).first() || {}
+    const [modulos, permisosDinamicos] = await Promise.all([
+      db('user_modulos').where('user_id', user.id).first(),
+      db('user_modulo_permisos').where('user_id', user.id).select('modulo', 'habilitado'),
+    ])
+    user.modulos = {
+      ...(modulos || {}),
+      ...Object.fromEntries(permisosDinamicos.map(p => [p.modulo, !!p.habilitado])),
+    }
 
     req.user = user
     next()
@@ -84,6 +95,15 @@ export function requireModulo(modulo) {
       return res.status(403).json({ error: 'Este módulo no está disponible en el portal del trabajador' })
     }
     const modulos = req.user.modulos || {}
+    // El catálogo documental contiene borradores y archivos privados; exige
+    // asignación explícita incluso para cuentas antiguas sin fila de permisos.
+    if (modulo === 'gestor_documental' && !modulos.gestor_documental) {
+      return res.status(403).json({
+        error: 'Este modulo no esta habilitado para tu cuenta. Debes solicitar el acceso al administrador.',
+        modulo,
+        code: 'MODULO_NO_HABILITADO',
+      })
+    }
     const configurado = Object.keys(modulos).some(k => k !== 'id' && k !== 'user_id' && k !== 'created_at' && k !== 'updated_at')
     if (req.user.role === 'asesor' || configurado) {
       if (!modulos[modulo]) {

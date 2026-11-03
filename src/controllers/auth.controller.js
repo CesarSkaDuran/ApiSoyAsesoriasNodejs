@@ -35,7 +35,11 @@ async function buildUserPayload(user) {
   let empresa = null
   let persona = null
   if (user.role === 'empresa') {
-    empresa = await db('empresas').where('user_id', user.id).first()
+    empresa = await db('empresas as e')
+      .leftJoin('empresa_usuarios as eu', 'eu.empresa_id', 'e.id')
+      .where(q => q.where('e.user_id', user.id).orWhere('eu.user_id', user.id))
+      .select('e.*')
+      .first()
   } else if (user.role === 'independiente') {
     persona = await db('personas').where('user_id', user.id).first()
   } else if (user.role === 'trabajador') {
@@ -53,7 +57,14 @@ async function buildUserPayload(user) {
       user.empresa_id = empleado.empresa_id
     }
   }
-  const modulos = await db('user_modulos').where('user_id', user.id).first() || {}
+  const [modulosBase, permisosDinamicos] = await Promise.all([
+    db('user_modulos').where('user_id', user.id).first(),
+    db('user_modulo_permisos').where('user_id', user.id).select('modulo', 'habilitado'),
+  ])
+  const modulos = {
+    ...(modulosBase || {}),
+    ...Object.fromEntries(permisosDinamicos.map(p => [p.modulo, !!p.habilitado])),
+  }
   const { password: _, ...userSafe } = user
   // Consentimiento vigente (aceptacion exacta de la version actual)
   const terminos_aceptados = !!user.terminos_aceptados_en
@@ -77,7 +88,7 @@ export async function login(req, res) {
   }
 
   const user = await db('users')
-    .select('id', 'name', 'lastname', 'email', 'password', 'role', 'is_active', 'terminos_aceptados_en', 'terminos_version')
+    .select('id', 'name', 'lastname', 'email', 'password', 'role', 'perfil_acceso', 'is_active', 'terminos_aceptados_en', 'terminos_version')
     .where('email', email)
     .first()
 
@@ -120,7 +131,7 @@ export async function refresh(req, res) {
   }
 
   const user = await db('users')
-    .select('id', 'name', 'lastname', 'email', 'password', 'role', 'is_active', 'terminos_aceptados_en', 'terminos_version')
+    .select('id', 'name', 'lastname', 'email', 'password', 'role', 'perfil_acceso', 'is_active', 'terminos_aceptados_en', 'terminos_version')
     .where('id', row.user_id)
     .first()
 
@@ -202,7 +213,7 @@ export async function changePassword(req, res) {
   }
 
   const user = await db('users')
-    .select('id', 'name', 'lastname', 'email', 'password', 'role', 'is_active', 'terminos_aceptados_en', 'terminos_version')
+    .select('id', 'name', 'lastname', 'email', 'password', 'role', 'perfil_acceso', 'is_active', 'terminos_aceptados_en', 'terminos_version')
     .where('id', req.user.id)
     .first()
   if (!user || !user.is_active) return res.status(403).json({ error: 'Usuario no disponible' })
@@ -237,47 +248,90 @@ export async function changePassword(req, res) {
 // Solo admin. Reemplaza el UserMutation inseguro del sistema viejo.
 export async function createUser(req, res) {
   const { name, lastname, email, password, role, empresa_id, persona_id, modulos } = req.body
+  const perfilGestorDocumental = role === 'gestor_documental'
+  const roleGuardado = perfilGestorDocumental ? 'empresa' : role
 
   if (!name || !email || !password || !role) {
     return res.status(400).json({ error: 'name, email, password y role son requeridos' })
   }
-  if (!['empresa', 'independiente', 'admin', 'asesor'].includes(role)) {
+  if (!['empresa', 'independiente', 'admin', 'asesor', 'gestor_documental'].includes(role)) {
     return res.status(400).json({ error: 'role invalido' })
+  }
+  if (perfilGestorDocumental && !empresa_id) {
+    return res.status(400).json({ error: 'Selecciona la empresa para el usuario de Gestor Documental' })
+  }
+  if (roleGuardado === 'empresa' && empresa_id
+    && !await db('empresas').where('id', empresa_id).first('id')) {
+    return res.status(404).json({ error: 'Empresa no encontrada' })
   }
 
   const exists = await db('users').where('email', email).first()
   if (exists) return res.status(409).json({ error: 'El email ya esta registrado' })
+
+  const modulosEntrada = perfilGestorDocumental
+    ? { gestor_documental: true, solicitudes: true, ...(modulos || {}) }
+    : (modulos || {})
 
   const [userId] = await db('users').insert({
     name,
     lastname: lastname || null,
     email,
     password: bcrypt.hashSync(password, 10),
-    role,
+    role: roleGuardado,
+    perfil_acceso: perfilGestorDocumental ? 'gestor_documental' : null,
     is_active: true,
   })
 
+  const modulosSistema = [
+    'home', 'empresas', 'independientes', 'pagos', 'gastos', 'informes',
+    'soportes', 'solicitudes', 'documentos', 'empleados', 'nominas',
+    'planillas', 'servicios', 'diagnosticos', 'gestor_documental',
+  ]
+  const modulosBase = Object.fromEntries(
+    Object.entries(modulosEntrada).filter(([key]) => modulosSistema.includes(key))
+  )
+  const permisosDinamicos = Object.entries(modulosEntrada).filter(([key]) =>
+    !modulosSistema.includes(key) && /^[a-z][a-z0-9_]{1,79}$/.test(key)
+  )
+
   // Vincular a empresa/persona y permisos por defecto
-  if (role === 'empresa' && empresa_id) {
-    await db('empresas').where('id', empresa_id).update({ user_id: userId })
+  if (roleGuardado === 'empresa' && empresa_id) {
+    const empresa = await db('empresas').where('id', empresa_id).first('id', 'user_id')
+    if (!empresa.user_id) {
+      await db('empresas').where('id', empresa_id).update({ user_id: userId })
+    } else {
+      await db('empresa_usuarios').insert({ empresa_id, user_id: userId })
+    }
+    const permisosInicialesEmpresa = perfilGestorDocumental
+      ? Object.fromEntries(modulosSistema.map(modulo => [modulo, false]))
+      : {
+          home: true, empresas: true, documentos: true, empleados: true,
+          nominas: true, planillas: true, servicios: true, pagos: true,
+          solicitudes: true, soportes: true, diagnosticos: true, gestor_documental: true,
+        }
     await db('user_modulos').insert({
       user_id: userId,
-      home: true, empresas: true, documentos: true, empleados: true,
-      nominas: true, planillas: true, servicios: true, pagos: true,
-      solicitudes: true, soportes: true, diagnosticos: true,
-      ...(modulos || {}),
+      ...permisosInicialesEmpresa,
+      ...modulosBase,
     })
-  } else if (role === 'independiente' && persona_id) {
+  } else if (roleGuardado === 'independiente' && persona_id) {
     await db('personas').where('id', persona_id).update({ user_id: userId })
     await db('user_modulos').insert({
       user_id: userId,
       home: true, documentos: true, pagos: true, planillas: true,
       servicios: true, independientes: true, solicitudes: true,
       soportes: true, diagnosticos: true,
-      ...(modulos || {}),
+      ...modulosBase,
     })
   } else {
-    await db('user_modulos').insert({ user_id: userId, ...(modulos || {}) })
+    await db('user_modulos').insert({ user_id: userId, ...modulosBase })
+  }
+  if (permisosDinamicos.length) {
+    await db('user_modulo_permisos').insert(permisosDinamicos.map(([modulo, habilitado]) => ({
+      user_id: userId,
+      modulo,
+      habilitado: !!habilitado,
+    })))
   }
 
   const user = await db('users').where('id', userId).first()

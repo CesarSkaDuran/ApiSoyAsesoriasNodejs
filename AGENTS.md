@@ -65,6 +65,24 @@
 - Mantener `src/index.js` sin top-level await: el cargador Passenger/LiteSpeed
   requiere la entrada y no soporta módulos ESM con top-level await.
 
+## Permisos por módulo
+
+- `admin` siempre tiene acceso; `asesor` y usuarios cliente pasan por
+  `requireModulo(clave)`.
+- Los permisos históricos siguen en columnas de `user_modulos`. Las claves
+  nuevas se guardan en `user_modulo_permisos` sin agregar columnas.
+- Al sumar una clave de módulo, incluirla en la ruta y en `NavigationItem.modulo`;
+  el formulario de usuarios deriva automáticamente de ahí sus checkboxes.
+- El perfil `gestor_documental` se persiste como `users.role='empresa'` +
+  `perfil_acceso`; la empresa adicional se vincula en `empresa_usuarios` para
+  no reemplazar `empresas.user_id`. Su preset habilita solo Gestor Documental
+  y Solicitudes; los módulos posteriores se asignan en el editor de usuario.
+- El catálogo del Gestor Documental parte de
+  `src/db/data/gestor-documental-catalogo.json`; la migración solo lo siembra
+  si está vacío. Los borradores del admin y los archivos de clientes tienen
+  almacenamiento y endpoints distintos; la carga del cliente siempre se
+  fuerza a su empresa autenticada.
+
 ## Despliegue y reinicio en producción (cPanel / LiteSpeed)
 
 - URL pública: `https://conexion.soyasesorias.co`
@@ -84,7 +102,9 @@ cd /home/soyaseso/soyasesorias-api-app
 # Identifica solo los workers de esta aplicación
 ps -u "$USER" -o pid,etime,cmd | grep -E '[n]ode|[p]m2|[p]assenger'
 
-# Termina los PID actuales cuya línea sea lsnode:/home/soyaseso/soyasesorias-api-app/
+# IMPORTANTE: <PID1> y <PID2> son marcadores. Sustitúyelos por los números
+# que aparezcan ahora en la salida, sin escribir los signos < >.
+# Termina solo los PID cuya línea sea lsnode:/home/soyaseso/soyasesorias-api-app/
 kill -TERM <PID1> <PID2>
 sleep 2
 

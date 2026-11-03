@@ -1,4 +1,5 @@
 import db from './knex.js'
+import { readFileSync } from 'fs'
 import { NOMINA_PARAMETER_DEFAULTS, NOMINA_JSON_FIELDS } from '../nomina-parameters.js'
 import { festivosDelAnio } from '../festivos.js'
 import { migrateIdentidades } from './migrate-identidades.js'
@@ -136,11 +137,16 @@ export async function runMigrations() {
       t.string('email', 191).notNullable().unique()
       t.string('password', 255).notNullable()
       t.enum('role', ['admin', 'empresa', 'independiente']).defaultTo('empresa')
+      t.string('perfil_acceso', 30).nullable()
       t.boolean('is_active').defaultTo(true)
       t.timestamp('last_seen_at').nullable()
       t.timestamps(true, true)
     })
     console.log('  + users')
+  }
+  if (!await db.schema.hasColumn('users', 'perfil_acceso')) {
+    await db.schema.alterTable('users', t => t.string('perfil_acceso', 30).nullable())
+    console.log('  + users.perfil_acceso')
   }
 
   // Permisos por modulo (reemplaza tabla modulos: 1=si, 0/2=no segun regla de negocio)
@@ -161,10 +167,23 @@ export async function runMigrations() {
       t.boolean('nominas').defaultTo(false)
       t.boolean('planillas').defaultTo(false)
       t.boolean('servicios').defaultTo(false)
+      t.boolean('gestor_documental').defaultTo(false)
       t.timestamps(true, true)
       t.unique(['user_id'])
     })
     console.log('  + user_modulos')
+  }
+  if (!await db.schema.hasTable('user_modulo_permisos')) {
+    await db.schema.createTable('user_modulo_permisos', t => {
+      t.increments('id')
+      t.integer('user_id').unsigned().notNullable().index()
+        .references('id').inTable('users').onDelete('CASCADE')
+      t.string('modulo', 80).notNullable()
+      t.boolean('habilitado').notNullable().defaultTo(false)
+      t.timestamps(true, true)
+      t.unique(['user_id', 'modulo'], 'user_modulo_permisos_user_modulo_unique')
+    })
+    console.log('  + user_modulo_permisos')
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -218,6 +237,21 @@ export async function runMigrations() {
         t.string('exonerado_parafiscales', 5).nullable()
       })
     }
+  }
+
+  // Permite varios usuarios de acceso para una misma empresa sin reemplazar
+  // el usuario principal conservado en empresas.user_id.
+  if (!await db.schema.hasTable('empresa_usuarios')) {
+    await createTable('empresa_usuarios', t => {
+      t.increments('id')
+      t.integer('empresa_id').unsigned().notNullable().index()
+        .references('id').inTable('empresas').onDelete('CASCADE')
+      // users puede ser MyISAM en instalaciones heredadas; no declarar FK.
+      t.integer('user_id').unsigned().notNullable().unique()
+      t.timestamps(true, true)
+      t.unique(['empresa_id', 'user_id'], 'empresa_usuarios_empresa_user_unique')
+    })
+    console.log('  + empresa_usuarios')
   }
 
   // Trabajadores independientes (persona natural cliente)
@@ -979,6 +1013,120 @@ export async function runMigrations() {
     console.log('  + documentos')
   }
 
+  // Gestor documental: carpetas por empresa y documentos privados en el
+  // almacenamiento existente, separados de los documentos de requisitos.
+  if (!await db.schema.hasTable('gestor_documental_carpetas')) {
+    await db.schema.createTable('gestor_documental_carpetas', t => {
+      t.increments('id')
+      t.integer('empresa_id').unsigned().notNullable().index()
+        .references('id').inTable('empresas').onDelete('CASCADE')
+      t.integer('parent_id').unsigned().nullable().index()
+        .references('id').inTable('gestor_documental_carpetas').onDelete('SET NULL')
+      t.string('nombre', 120).notNullable()
+      t.integer('created_by').unsigned().nullable()
+        .references('id').inTable('users').onDelete('SET NULL')
+      t.timestamps(true, true)
+      t.index(['empresa_id', 'parent_id'], 'gdc_empresa_parent_idx')
+    })
+    console.log('  + gestor_documental_carpetas')
+  }
+  if (await db.schema.hasTable('documentos')) {
+    if (!await db.schema.hasColumn('documentos', 'gestor_carpeta_id')) {
+      await db.schema.alterTable('documentos', t => {
+        t.integer('gestor_carpeta_id').unsigned().nullable().index()
+          .references('id').inTable('gestor_documental_carpetas').onDelete('SET NULL')
+      })
+      console.log('  + documentos.gestor_carpeta_id')
+    }
+    if (!await db.schema.hasColumn('documentos', 'es_gestor_documental')) {
+      await db.schema.alterTable('documentos', t => {
+        t.boolean('es_gestor_documental').notNullable().defaultTo(false).index()
+      })
+      console.log('  + documentos.es_gestor_documental')
+    }
+  }
+
+  if (!await db.schema.hasTable('gestor_documental_categorias')) {
+    await createTable('gestor_documental_categorias', t => {
+      t.increments('id')
+      t.string('codigo', 180).notNullable().unique()
+      t.string('numero', 20).nullable()
+      t.integer('parent_id').unsigned().nullable().index()
+        .references('id').inTable('gestor_documental_categorias').onDelete('SET NULL')
+      t.string('nombre', 255).notNullable()
+      t.integer('orden').notNullable().defaultTo(0)
+      t.boolean('activo').notNullable().defaultTo(true)
+      t.timestamps(true, true)
+    })
+    console.log('  + gestor_documental_categorias')
+  }
+  if (!await db.schema.hasTable('gestor_documental_catalogo')) {
+    await createTable('gestor_documental_catalogo', t => {
+      t.increments('id')
+      t.string('source_code', 40).notNullable().unique()
+      t.integer('categoria_id').unsigned().notNullable().index()
+        .references('id').inTable('gestor_documental_categorias').onDelete('CASCADE')
+      t.string('nombre', 255).notNullable()
+      t.integer('orden').notNullable().defaultTo(0)
+      t.boolean('activo').notNullable().defaultTo(true)
+      t.string('borrador_path', 500).nullable()
+      t.string('borrador_nombre', 255).nullable()
+      t.string('borrador_mime', 100).nullable()
+      t.integer('borrador_size').unsigned().nullable()
+      t.boolean('borrador_publicado').notNullable().defaultTo(false)
+      t.integer('actualizado_por').unsigned().nullable()
+      t.timestamps(true, true)
+    })
+    console.log('  + gestor_documental_catalogo')
+  }
+  if (!await db.schema.hasTable('gestor_documental_archivos')) {
+    await createTable('gestor_documental_archivos', t => {
+      t.increments('id')
+      t.integer('empresa_id').unsigned().notNullable().index()
+        .references('id').inTable('empresas').onDelete('CASCADE')
+      t.integer('catalogo_id').unsigned().notNullable().index()
+        .references('id').inTable('gestor_documental_catalogo').onDelete('CASCADE')
+      t.integer('uploaded_by').unsigned().nullable()
+      t.string('nombre', 255).notNullable()
+      t.string('path', 500).notNullable()
+      t.string('mime', 100).nullable()
+      t.integer('size').unsigned().nullable()
+      t.timestamps(true, true)
+      t.index(['empresa_id', 'catalogo_id', 'id'], 'gda_empresa_catalogo_id_idx')
+    })
+    console.log('  + gestor_documental_archivos')
+  }
+
+  // Seed del Excel recibido. Solo se ejecuta cuando el catálogo está vacío
+  // para conservar los cambios de nombres y estados hechos por el admin.
+  if (await db('gestor_documental_categorias').count({ total: '*' }).first().then(r => Number(r.total)) === 0) {
+    const catalogoInicial = JSON.parse(
+      readFileSync(new URL('./data/gestor-documental-catalogo.json', import.meta.url), 'utf8')
+    )
+    await db.transaction(async trx => {
+      const ids = new Map()
+      for (const categoria of catalogoInicial.categories) {
+        const [id] = await trx('gestor_documental_categorias').insert({
+          codigo: categoria.code,
+          numero: categoria.number,
+          parent_id: categoria.parent_code ? ids.get(categoria.parent_code) : null,
+          nombre: categoria.name,
+          orden: categoria.sort_order,
+        })
+        ids.set(categoria.code, id)
+        if (categoria.documents.length) {
+          await trx('gestor_documental_catalogo').insert(categoria.documents.map((documento, index) => ({
+            source_code: documento.source_code,
+            categoria_id: id,
+            nombre: documento.name,
+            orden: index + 1,
+          })))
+        }
+      }
+    })
+    console.log(`  + catálogo gestor documental (${catalogoInicial.categories.length} categorías, ${catalogoInicial.categories.reduce((n, c) => n + c.documents.length, 0)} documentos)`)
+  }
+
   // ══════════════════════════════════════════════════════════════════
   // OPERACION: solicitudes, soporte, notificaciones, observaciones
   // ══════════════════════════════════════════════════════════════════
@@ -989,11 +1137,24 @@ export async function runMigrations() {
       t.integer('empresa_id').unsigned().references('id').inTable('empresas').nullable().index()
       t.integer('persona_id').unsigned().references('id').inTable('personas').nullable().index()
       t.integer('servicio_id').unsigned().references('id').inTable('servicios').nullable()
+      t.integer('gestor_categoria_id').unsigned().nullable().index()
+      t.integer('gestor_catalogo_id').unsigned().nullable().index()
+      t.integer('solicitado_por').unsigned().nullable().index()
       t.string('descripcion', 500).nullable()
       t.enum('status', ['pendiente', 'aprobada', 'en_proceso', 'completada', 'rechazada', 'cancelada']).defaultTo('pendiente')
       t.timestamps(true, true)
     })
     console.log('  + solicitudes')
+  }
+  for (const [column, addColumn] of [
+    ['gestor_categoria_id', t => t.integer('gestor_categoria_id').unsigned().nullable().index()],
+    ['gestor_catalogo_id', t => t.integer('gestor_catalogo_id').unsigned().nullable().index()],
+    ['solicitado_por', t => t.integer('solicitado_por').unsigned().nullable().index()],
+  ]) {
+    if (!await db.schema.hasColumn('solicitudes', column)) {
+      await db.schema.alterTable('solicitudes', addColumn)
+      console.log(`  + solicitudes.${column}`)
+    }
   }
 
   const [solicitudStatusColumns] = await db.raw("SHOW COLUMNS FROM `solicitudes` LIKE 'status'")
@@ -1541,6 +1702,12 @@ export async function runMigrations() {
       })
       console.log('  ~ user_modulos (diagnosticos)')
     }
+    if (!await db.schema.hasColumn('user_modulos', 'gestor_documental')) {
+      await db.schema.alterTable('user_modulos', t => {
+        t.boolean('gestor_documental').defaultTo(false)
+      })
+      console.log('  ~ user_modulos (gestor_documental)')
+    }
   }
 
   // Refresh tokens (rotación: cada uso revoca el anterior)
@@ -2069,6 +2236,21 @@ export async function runMigrations() {
       t.timestamp('aplicada_en').defaultTo(db.fn.now())
     })
     console.log('  + migraciones_log')
+  }
+
+  {
+    const nombre = 'gestor_documental_subcategorias_5_5'
+    const ya = await db('migraciones_log').where('nombre', nombre).first()
+    if (!ya) {
+      await db('gestor_documental_categorias')
+        .where('codigo', '5.5-gestion-de-turno-y-horarios-laborales')
+        .update({ numero: '5.6' })
+      await db('gestor_documental_categorias')
+        .where('codigo', '5.5-gestion-documental-del-proceso')
+        .update({ numero: '5.7' })
+      await db('migraciones_log').insert({ nombre })
+      console.log('  ~ catálogo gestor documental: se normalizaron subcategorías repetidas 5.5')
+    }
   }
 
   // Habilitacion de modulos para clientes: los checks de user_modulos

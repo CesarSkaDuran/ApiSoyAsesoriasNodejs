@@ -6,6 +6,7 @@ import empresasRoutes from './empresas.routes.js'
 import empleadosRoutes from './empleados.routes.js'
 import nominasRoutes from './nominas.routes.js'
 import documentosRoutes from './documentos.routes.js'
+import gestorDocumentalRoutes from './gestor-documental.routes.js'
 import serviciosRoutes from './servicios.routes.js'
 import pagosRoutes from './pagos.routes.js'
 import planillasRoutes from './planillas.routes.js'
@@ -30,6 +31,7 @@ router.use('/empresas', empresasRoutes)
 router.use('/empleados', empleadosRoutes)
 router.use('/nominas', nominasRoutes)
 router.use('/documentos', documentosRoutes)
+router.use('/gestor-documental', gestorDocumentalRoutes)
 router.use('/pagos', pagosRoutes)
 router.use('/planillas', planillasRoutes)
 router.use('/solicitudes', solicitudesRoutes)

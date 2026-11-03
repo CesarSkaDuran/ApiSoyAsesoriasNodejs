@@ -8,12 +8,15 @@ export async function list(req, res) {
 
   const query = db('users')
     .leftJoin('empresas', 'users.id', 'empresas.user_id')
+    .leftJoin('empresa_usuarios as eu', 'users.id', 'eu.user_id')
+    .leftJoin('empresas as linked_empresa', 'eu.empresa_id', 'linked_empresa.id')
     .leftJoin('personas', 'users.id', 'personas.user_id')
     .leftJoin('empleados', 'users.id', 'empleados.user_id')
     .leftJoin('user_modulos', 'users.id', 'user_modulos.user_id')
-    .select('users.id', 'users.name', 'users.lastname', 'users.email', 'users.role',
+    .select('users.id', 'users.name', 'users.lastname', 'users.email', 'users.role', 'users.perfil_acceso',
       'users.is_active', 'users.created_at',
-      'empresas.id as empresa_id', 'empresas.razon_social as empresa_nombre',
+      db.raw('COALESCE(empresas.id, linked_empresa.id) as empresa_id'),
+      db.raw('COALESCE(empresas.razon_social, linked_empresa.razon_social) as empresa_nombre'),
       'personas.id as persona_id',
       db.raw("CONCAT_WS(' ', personas.primer_nombre, personas.primer_apellido) as persona_nombre"),
       'empleados.id as empleado_id',
@@ -28,6 +31,7 @@ export async function list(req, res) {
       q.where('users.name', 'like', `%${search}%`)
        .orWhere('users.email', 'like', `%${search}%`)
        .orWhere('empresas.razon_social', 'like', `%${search}%`)
+       .orWhere('linked_empresa.razon_social', 'like', `%${search}%`)
        .orWhere('empleados.primer_nombre', 'like', `%${search}%`)
        .orWhere('empleados.numero_documento', 'like', `%${search}%`)
     )
@@ -46,17 +50,27 @@ export async function list(req, res) {
 export async function show(req, res) {
   const user = await db('users')
     .where('users.id', req.params.id)
-    .select('users.id', 'users.name', 'users.lastname', 'users.email', 'users.role',
+    .select('users.id', 'users.name', 'users.lastname', 'users.email', 'users.role', 'users.perfil_acceso',
       'users.is_active', 'users.created_at')
     .first()
   if (!user) return res.status(404).json({ error: 'Usuario no encontrado' })
 
-  const [empresa, persona, empleado, modulos] = await Promise.all([
+  const [empresaPrincipal, empresaVinculada, persona, empleado, modulosBase, permisosDinamicos] = await Promise.all([
     db('empresas').where('user_id', user.id).first(),
+    db('empresa_usuarios as eu')
+      .join('empresas as e', 'e.id', 'eu.empresa_id')
+      .where('eu.user_id', user.id)
+      .select('e.*').first(),
     db('personas').where('user_id', user.id).first(),
     db('empleados').where('user_id', user.id).first(),
     db('user_modulos').where('user_id', user.id).first(),
+    db('user_modulo_permisos').where('user_id', user.id).select('modulo', 'habilitado'),
   ])
+  const empresa = empresaPrincipal || empresaVinculada
+  const modulos = {
+    ...(modulosBase || {}),
+    ...Object.fromEntries(permisosDinamicos.map(p => [p.modulo, !!p.habilitado])),
+  }
   res.json({ user, empresa, persona, empleado, modulos })
 }
 
@@ -77,11 +91,24 @@ export async function update(req, res) {
   if (modulos && typeof modulos === 'object') {
     const exists = await db('user_modulos').where('user_id', user.id).first()
     const MODULOS = ['home','empresas','independientes','pagos','gastos','informes',
-      'soportes','solicitudes','documentos','empleados','nominas','planillas','servicios','diagnosticos']
+      'soportes','solicitudes','documentos','empleados','nominas','planillas','servicios','diagnosticos',
+      'gestor_documental']
     const modData = {}
     for (const m of MODULOS) if (modulos[m] !== undefined) modData[m] = !!modulos[m]
     if (exists) await db('user_modulos').where('user_id', user.id).update(modData)
     else await db('user_modulos').insert({ user_id: user.id, ...modData })
+
+    const dinamicos = Object.entries(modulos).filter(([key]) =>
+      !MODULOS.includes(key) && /^[a-z][a-z0-9_]{1,79}$/.test(key)
+    )
+    for (const [modulo, habilitado] of dinamicos) {
+      const permission = await db('user_modulo_permisos').where({ user_id: user.id, modulo }).first('id')
+      if (permission) {
+        await db('user_modulo_permisos').where('id', permission.id).update({ habilitado: !!habilitado })
+      } else {
+        await db('user_modulo_permisos').insert({ user_id: user.id, modulo, habilitado: !!habilitado })
+      }
+    }
   }
 
   const actualizado = await db('users')

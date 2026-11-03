@@ -18,6 +18,7 @@ function canAccessSolicitud(user, solicitud) {
 }
 
 async function clientUserId(trx, solicitud) {
+  if (solicitud.solicitado_por) return solicitud.solicitado_por
   if (solicitud.empleado_id) {
     return (await trx('empleados').select('user_id').where('id', solicitud.empleado_id).first())?.user_id
   }
@@ -265,6 +266,8 @@ export async function list(req, res) {
     .leftJoin('personas', 'solicitudes.persona_id', 'personas.id')
     .leftJoin('empleados', 'solicitudes.empleado_id', 'empleados.id')
     .leftJoin('servicios', 'solicitudes.servicio_id', 'servicios.id')
+    .leftJoin('gestor_documental_categorias as gc', 'solicitudes.gestor_categoria_id', 'gc.id')
+    .leftJoin('gestor_documental_catalogo as gd', 'solicitudes.gestor_catalogo_id', 'gd.id')
     .select('solicitudes.*', 'empresas.razon_social as empresa_nombre',
       'empresas.num_documento as empresa_nit',
       'empresas.telefono_contacto as empresa_telefono',
@@ -274,6 +277,8 @@ export async function list(req, res) {
       'empleados.primer_apellido as empleado_primer_apellido',
       'empleados.numero_documento as empleado_documento',
       'servicios.nombre as servicio_nombre',
+      'gc.nombre as gestor_categoria_nombre',
+      'gd.nombre as gestor_documento_nombre',
       db.raw("CONCAT_WS(' ', personas.primer_nombre, personas.primer_apellido) as persona_nombre"),
       db.raw(`COALESCE(empresas.razon_social,
         CONCAT_WS(' ', personas.primer_nombre, personas.primer_apellido)) as cliente_nombre`),
@@ -391,6 +396,7 @@ export async function create(req, res) {
       persona_id: personaId || null,
       empleado_id: empleado?.id || null,
       tipo_solicitud: tipo,
+      solicitado_por: req.user.id,
       fecha_inicio: tipo === 'vacaciones' ? req.body.fecha_inicio : null,
       fecha_fin: tipo === 'vacaciones' ? req.body.fecha_fin : null,
       servicio_id: req.body.servicio_id || null,
@@ -512,9 +518,9 @@ export async function update(req, res) {
         await trx('servicio_registros').where('id', serviceRecord.id).update({ status: serviceStatus })
       }
 
-      const clientUserId = solicitud.empresa_id
+      const clientUserId = solicitud.solicitado_por || (solicitud.empresa_id
         ? (await trx('empresas').select('user_id').where('id', solicitud.empresa_id).first())?.user_id
-        : (await trx('personas').select('user_id').where('id', solicitud.persona_id).first())?.user_id
+        : (await trx('personas').select('user_id').where('id', solicitud.persona_id).first())?.user_id)
       notifications.push(...await createNotifications(trx, clientUserId ? [clientUserId] : [], {
         titulo: 'Actualización de tu solicitud',
         mensaje: `La solicitud #${solicitud.id} cambió a: ${data.status.replace('_', ' ')}.`,

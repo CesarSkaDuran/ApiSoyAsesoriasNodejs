@@ -1,0 +1,1495 @@
+{
+  "source": "GESTOR DOCUMENTAL.xlsx / hoja Gestion Documentos",
+  "categories": [
+    {
+      "source_row": 7,
+      "number": "0",
+      "code": "0",
+      "parent_code": null,
+      "name": "DOCUMENTOS LEGALES",
+      "documents": [
+        {
+          "source_code": "xlsx-row-8",
+          "source_row": 8,
+          "name": "Certificado de existencia y representación legal (vigente)"
+        },
+        {
+          "source_code": "xlsx-row-9",
+          "source_row": 9,
+          "name": "RUT actualizado con actividad económica (código CIIU)"
+        },
+        {
+          "source_code": "xlsx-row-10",
+          "source_row": 10,
+          "name": "Registro mercantil vigente"
+        },
+        {
+          "source_code": "xlsx-row-11",
+          "source_row": 11,
+          "name": "Sucursales"
+        },
+        {
+          "source_code": "xlsx-row-12",
+          "source_row": 12,
+          "name": "Representante Legal"
+        },
+        {
+          "source_code": "xlsx-row-13",
+          "source_row": 13,
+          "name": "Pólizas de seguros empresariales Vigente."
+        },
+        {
+          "source_code": "xlsx-row-14",
+          "source_row": 14,
+          "name": "Organigrama De La Empresa/  Jerarquias."
+        },
+        {
+          "source_code": "xlsx-row-15",
+          "source_row": 15,
+          "name": "Logo"
+        }
+      ],
+      "sort_order": 1
+    },
+    {
+      "source_row": 18,
+      "number": "1",
+      "code": "1",
+      "parent_code": null,
+      "name": "REGLAMENTO INTERNO DE TRABAJO",
+      "documents": [
+        {
+          "source_code": "xlsx-row-19",
+          "source_row": 19,
+          "name": "Reglamento Interno de Trabajo adoptado y vigente"
+        },
+        {
+          "source_code": "xlsx-row-20",
+          "source_row": 20,
+          "name": "Socializacion de RIT. Evidencia"
+        },
+        {
+          "source_code": "xlsx-row-21",
+          "source_row": 21,
+          "name": "Publicación en todas las sucursales EVIDENCIA."
+        },
+        {
+          "source_code": "xlsx-row-22",
+          "source_row": 22,
+          "name": "Término de observaciones otorgado a trabajadores"
+        },
+        {
+          "source_code": "xlsx-row-23",
+          "source_row": 23,
+          "name": "Matriz de actualizacion legal reglamento."
+        },
+        {
+          "source_code": "xlsx-row-24",
+          "source_row": 24,
+          "name": "Justa causa para terminar los contratos."
+        },
+        {
+          "source_code": "xlsx-row-25",
+          "source_row": 25,
+          "name": "Conductas  no permitida en la empresa"
+        },
+        {
+          "source_code": "xlsx-row-26",
+          "source_row": 26,
+          "name": "Prohibiciones para los trabajdores."
+        },
+        {
+          "source_code": "xlsx-row-27",
+          "source_row": 27,
+          "name": "Deberes de los trabajdores."
+        }
+      ],
+      "sort_order": 2
+    },
+    {
+      "source_row": 30,
+      "number": "2",
+      "code": "2",
+      "parent_code": null,
+      "name": "POLITICAS CORPORATIVAS",
+      "documents": [
+        {
+          "source_code": "xlsx-row-31",
+          "source_row": 31,
+          "name": "Manual Para estructurar Politicas Corporativa."
+        },
+        {
+          "source_code": "xlsx-row-32",
+          "source_row": 32,
+          "name": "POLITICAS Prevención"
+        },
+        {
+          "source_code": "xlsx-row-33",
+          "source_row": 33,
+          "name": "Politicas de Acoso Laboral (Documento)"
+        },
+        {
+          "source_code": "xlsx-row-34",
+          "source_row": 34,
+          "name": "Protocolos contra acoso laboral documentados"
+        },
+        {
+          "source_code": "xlsx-row-35",
+          "source_row": 35,
+          "name": "Politicas de Acoso Sexual (Documento)"
+        },
+        {
+          "source_code": "xlsx-row-36",
+          "source_row": 36,
+          "name": "Mecanismos contra acoso sexual implementados"
+        },
+        {
+          "source_code": "xlsx-row-37",
+          "source_row": 37,
+          "name": "Politica de no discriminacion y violencia.(Documento)"
+        },
+        {
+          "source_code": "xlsx-row-38",
+          "source_row": 38,
+          "name": "Campañas de prevención de discriminación y violencia"
+        },
+        {
+          "source_code": "xlsx-row-39",
+          "source_row": 39,
+          "name": "Política institucional Contra Violencias de Género (Documento)"
+        },
+        {
+          "source_code": "xlsx-row-40",
+          "source_row": 40,
+          "name": "POLITICAS Institucionales."
+        },
+        {
+          "source_code": "xlsx-row-41",
+          "source_row": 41,
+          "name": "Politica de uso de Dispositivos Moviles y Tecnologia,"
+        },
+        {
+          "source_code": "xlsx-row-42",
+          "source_row": 42,
+          "name": "Politica de Permisos y Licencias."
+        },
+        {
+          "source_code": "xlsx-row-43",
+          "source_row": 43,
+          "name": "Politica de Tratamiento de Datos y Manejo de Informacion."
+        },
+        {
+          "source_code": "xlsx-row-44",
+          "source_row": 44,
+          "name": "Politica de Seguridad Informatica. Ciberseguridad"
+        }
+      ],
+      "sort_order": 3
+    },
+    {
+      "source_row": 49,
+      "number": "3",
+      "code": "3",
+      "parent_code": null,
+      "name": "SISTEMA SELECCIÓN DE PERSONAL",
+      "documents": [
+        {
+          "source_code": "xlsx-row-50",
+          "source_row": 50,
+          "name": "Manual Coporativo De SELECCIÒN De Personal."
+        },
+        {
+          "source_code": "xlsx-row-51",
+          "source_row": 51,
+          "name": "Politica de Selección de personal."
+        },
+        {
+          "source_code": "xlsx-row-52",
+          "source_row": 52,
+          "name": "Formularios de solicitud de empleo estandarizados"
+        },
+        {
+          "source_code": "xlsx-row-53",
+          "source_row": 53,
+          "name": "Autorizacion de Tratamiento De Datos."
+        },
+        {
+          "source_code": "xlsx-row-54",
+          "source_row": 54,
+          "name": "Aceptacion de oferta laboral."
+        },
+        {
+          "source_code": "xlsx-row-55",
+          "source_row": 55,
+          "name": "Autorizacion de Practica de Evaluaciones Medicas."
+        },
+        {
+          "source_code": "xlsx-row-56",
+          "source_row": 56,
+          "name": "Requisición y autorización de vacante"
+        },
+        {
+          "source_code": "xlsx-row-57",
+          "source_row": 57,
+          "name": "Perfil del cargo y matriz de competencias"
+        },
+        {
+          "source_code": "xlsx-row-58",
+          "source_row": 58,
+          "name": "Anuncio o convocatoria de vacante"
+        },
+        {
+          "source_code": "xlsx-row-59",
+          "source_row": 59,
+          "name": "Formato de recepción y evaluación de hojas de vida"
+        },
+        {
+          "source_code": "xlsx-row-60",
+          "source_row": 60,
+          "name": "Guía y formato de entrevista"
+        },
+        {
+          "source_code": "xlsx-row-61",
+          "source_row": 61,
+          "name": "Prueba técnica y rúbrica de evaluación"
+        },
+        {
+          "source_code": "xlsx-row-62",
+          "source_row": 62,
+          "name": "Formato de verificación de referencias"
+        },
+        {
+          "source_code": "xlsx-row-63",
+          "source_row": 63,
+          "name": "Comunicación de selección o cierre del proceso"
+        },
+        {
+          "source_code": "xlsx-row-64",
+          "source_row": 64,
+          "name": "Lista de chequeo de entrega a contratación"
+        },
+        {
+          "source_code": "xlsx-row-65",
+          "source_row": 65,
+          "name": "Protocolo de custodia de hojas de vida y datos de candidatos"
+        }
+      ],
+      "sort_order": 4
+    },
+    {
+      "source_row": 71,
+      "number": "3.1",
+      "code": "3.1-perfiles-de-cargo-y-manuales-de-funciones",
+      "parent_code": "3",
+      "name": "PERFILES DE CARGO Y MANUALES DE FUNCIONES,",
+      "documents": [
+        {
+          "source_code": "xlsx-row-72",
+          "source_row": 72,
+          "name": "Manual de elaboración y actualización de perfiles de cargo"
+        },
+        {
+          "source_code": "xlsx-row-73",
+          "source_row": 73,
+          "name": "Organigrama empresarial"
+        },
+        {
+          "source_code": "xlsx-row-74",
+          "source_row": 74,
+          "name": "Matriz maestra de cargos"
+        },
+        {
+          "source_code": "xlsx-row-75",
+          "source_row": 75,
+          "name": "Formato de levantamiento y análisis del cargo"
+        },
+        {
+          "source_code": "xlsx-row-76",
+          "source_row": 76,
+          "name": "Formato de perfil de cargo"
+        },
+        {
+          "source_code": "xlsx-row-77",
+          "source_row": 77,
+          "name": "Manual de funciones y responsabilidades por cargo"
+        },
+        {
+          "source_code": "xlsx-row-78",
+          "source_row": 78,
+          "name": "Matriz de funciones y responsabilidades"
+        },
+        {
+          "source_code": "xlsx-row-79",
+          "source_row": 79,
+          "name": "Matriz de competencias y requisitos del cargo"
+        },
+        {
+          "source_code": "xlsx-row-80",
+          "source_row": 80,
+          "name": "Matriz de indicadores de desempeño por cargo"
+        },
+        {
+          "source_code": "xlsx-row-81",
+          "source_row": 81,
+          "name": "Matriz de riesgos asociados al cargo"
+        },
+        {
+          "source_code": "xlsx-row-82",
+          "source_row": 82,
+          "name": "Acta de entrega y socialización del perfil y manual de funciones"
+        },
+        {
+          "source_code": "xlsx-row-83",
+          "source_row": 83,
+          "name": "Formato de observaciones y aclaraciones sobre las funciones"
+        },
+        {
+          "source_code": "xlsx-row-84",
+          "source_row": 84,
+          "name": "Formato de actualización o modificación del perfil de cargo"
+        },
+        {
+          "source_code": "xlsx-row-85",
+          "source_row": 85,
+          "name": "Matriz de control de versiones y vigencia"
+        },
+        {
+          "source_code": "xlsx-row-86",
+          "source_row": 86,
+          "name": "Perfiles de cada Cargo(Formato)"
+        },
+        {
+          "source_code": "xlsx-row-87",
+          "source_row": 87,
+          "name": "Manuales de Funciones de Cada Cargo (Formato)"
+        },
+        {
+          "source_code": "xlsx-row-88",
+          "source_row": 88,
+          "name": "Formato de Induccion Al cargo."
+        },
+        {
+          "source_code": "xlsx-row-89",
+          "source_row": 89,
+          "name": "Formato de Induccion SST"
+        }
+      ],
+      "sort_order": 5
+    },
+    {
+      "source_row": 100,
+      "number": "4",
+      "code": "4",
+      "parent_code": null,
+      "name": "SISTEMA CONTRATACION DE PERSONAL",
+      "documents": [
+        {
+          "source_code": "xlsx-row-101",
+          "source_row": 101,
+          "name": "ARCHIVO DE TRABAJADORES/ ARCHIVO PLANO"
+        },
+        {
+          "source_code": "xlsx-row-102",
+          "source_row": 102,
+          "name": "SUCURSALES."
+        },
+        {
+          "source_code": "xlsx-row-103",
+          "source_row": 103,
+          "name": "Archivo CENSO/Perfil Sociodemografico"
+        },
+        {
+          "source_code": "xlsx-row-104",
+          "source_row": 104,
+          "name": "/LINK FORMULARIO TRABAJADORES."
+        },
+        {
+          "source_code": "xlsx-row-105",
+          "source_row": 105,
+          "name": "Trabajadores Extranjeros( ARCHIVO)"
+        },
+        {
+          "source_code": "xlsx-row-106",
+          "source_row": 106,
+          "name": "Registro de Trabajadores Extranjeros"
+        }
+      ],
+      "sort_order": 6
+    },
+    {
+      "source_row": 109,
+      "number": "4.1",
+      "code": "4.1-estrutura-salarial",
+      "parent_code": "4",
+      "name": "ESTRUTURA  SALARIAL",
+      "documents": [
+        {
+          "source_code": "xlsx-row-110",
+          "source_row": 110,
+          "name": "ARCHIVO DE TRABAJADORES/ ARCHIVO PLANO"
+        },
+        {
+          "source_code": "xlsx-row-111",
+          "source_row": 111,
+          "name": "SUC 1"
+        },
+        {
+          "source_code": "xlsx-row-112",
+          "source_row": 112,
+          "name": "SUC 2"
+        },
+        {
+          "source_code": "xlsx-row-113",
+          "source_row": 113,
+          "name": "SUC 3"
+        },
+        {
+          "source_code": "xlsx-row-114",
+          "source_row": 114,
+          "name": "Trabajadores Extranjeros( ARCHIVO)"
+        },
+        {
+          "source_code": "xlsx-row-115",
+          "source_row": 115,
+          "name": "Registro de Trabajadores Extranjeros"
+        },
+        {
+          "source_code": "xlsx-row-116",
+          "source_row": 116,
+          "name": "Archivo CENSO/Perfil Sociodemografico"
+        },
+        {
+          "source_code": "xlsx-row-117",
+          "source_row": 117,
+          "name": "/LINK FORMULARIO TRABAJADORES."
+        }
+      ],
+      "sort_order": 7
+    },
+    {
+      "source_row": 120,
+      "number": "4.2",
+      "code": "4.2-jornada-laboral",
+      "parent_code": "4",
+      "name": "JORNADA LABORAL",
+      "documents": [
+        {
+          "source_code": "xlsx-row-121",
+          "source_row": 121,
+          "name": "Manual Corporativo  De Aplicación de la Jornada Laboral"
+        },
+        {
+          "source_code": "xlsx-row-122",
+          "source_row": 122,
+          "name": "Horarios de trabajo (Diligenciar Archivo)"
+        },
+        {
+          "source_code": "xlsx-row-123",
+          "source_row": 123,
+          "name": "Registro de horas extras.( Archivo)"
+        },
+        {
+          "source_code": "xlsx-row-124",
+          "source_row": 124,
+          "name": "Entrega de relación de horas extras a trabajadores(Archivo)"
+        },
+        {
+          "source_code": "xlsx-row-125",
+          "source_row": 125,
+          "name": "Control diario de trabajo suplementario(Archivo)"
+        },
+        {
+          "source_code": "xlsx-row-126",
+          "source_row": 126,
+          "name": "Acuerdos de jornadas laborales. (Formato)"
+        },
+        {
+          "source_code": "xlsx-row-127",
+          "source_row": 127,
+          "name": "Anexo De Desconexion Laboral (Formato)"
+        },
+        {
+          "source_code": "xlsx-row-128",
+          "source_row": 128,
+          "name": "Registro de trabajadores en modalidad flexible/teletrabajo"
+        },
+        {
+          "source_code": "xlsx-row-129",
+          "source_row": 129,
+          "name": "Aplicación de Ley de desconexión laboral ((Format Socilizacion)"
+        },
+        {
+          "source_code": "xlsx-row-130",
+          "source_row": 130,
+          "name": "Políticas de Teletrabajo ( Documento)"
+        }
+      ],
+      "sort_order": 8
+    },
+    {
+      "source_row": 134,
+      "number": "4.3",
+      "code": "4.3-contratos-y-vinculacion",
+      "parent_code": "4",
+      "name": "CONTRATOS Y VINCULACION",
+      "documents": [
+        {
+          "source_code": "xlsx-row-135",
+          "source_row": 135,
+          "name": "Manual Corporativo De USO DE CONTRATOS Laborales."
+        },
+        {
+          "source_code": "xlsx-row-136",
+          "source_row": 136,
+          "name": "Contratos."
+        },
+        {
+          "source_code": "xlsx-row-137",
+          "source_row": 137,
+          "name": "Término indefinido"
+        },
+        {
+          "source_code": "xlsx-row-138",
+          "source_row": 138,
+          "name": "Término fijo (inferior y superior a un año)"
+        },
+        {
+          "source_code": "xlsx-row-139",
+          "source_row": 139,
+          "name": "Obra o labor"
+        },
+        {
+          "source_code": "xlsx-row-140",
+          "source_row": 140,
+          "name": "Tiempo Parcial"
+        },
+        {
+          "source_code": "xlsx-row-141",
+          "source_row": 141,
+          "name": "Teletabadores."
+        },
+        {
+          "source_code": "xlsx-row-142",
+          "source_row": 142,
+          "name": "Aprendices SENA Contrato"
+        },
+        {
+          "source_code": "xlsx-row-143",
+          "source_row": 143,
+          "name": "Trabadores de DIRECCION MANEJO Y CONFIANZA,"
+        },
+        {
+          "source_code": "xlsx-row-144",
+          "source_row": 144,
+          "name": "Contratos de la empresa Temporal"
+        }
+      ],
+      "sort_order": 9
+    },
+    {
+      "source_row": 150,
+      "number": "4.4",
+      "code": "4.4-contratacion-efectiva",
+      "parent_code": "4",
+      "name": "CONTRATACION EFECTIVA",
+      "documents": [
+        {
+          "source_code": "xlsx-row-151",
+          "source_row": 151,
+          "name": "Manual  De Contartacion Segura"
+        },
+        {
+          "source_code": "xlsx-row-152",
+          "source_row": 152,
+          "name": "1_Contrato-De_Trabajo_Minuta_Termino_Indefinido. 2026."
+        },
+        {
+          "source_code": "xlsx-row-153",
+          "source_row": 153,
+          "name": "2-Acta_De_Socializacion_Y_Entrega_Politica_Celulares .."
+        },
+        {
+          "source_code": "xlsx-row-154",
+          "source_row": 154,
+          "name": "3_Acta_Socilizacion_Politicas_Corporativas_Tabajador."
+        },
+        {
+          "source_code": "xlsx-row-155",
+          "source_row": 155,
+          "name": "4_Acta_Socilizacion_RIT_Ingreso_Trabajador."
+        },
+        {
+          "source_code": "xlsx-row-156",
+          "source_row": 156,
+          "name": "5_Acta-De-Induccion_ Capacitación, Entrega e Ingreso."
+        },
+        {
+          "source_code": "xlsx-row-157",
+          "source_row": 157,
+          "name": "6_Autorizacion_Practica_De_Evaluaciones_Medicas_Ocupacionales."
+        },
+        {
+          "source_code": "xlsx-row-158",
+          "source_row": 158,
+          "name": "7_Autorizacion-Descuentos- Por_ Danos-Imputables-Al-Trabajador."
+        },
+        {
+          "source_code": "xlsx-row-159",
+          "source_row": 159,
+          "name": "8_Aceptación De La Oferta Laboral."
+        },
+        {
+          "source_code": "xlsx-row-160",
+          "source_row": 160,
+          "name": "9-Entrega de Dotacion(Formato)"
+        },
+        {
+          "source_code": "xlsx-row-161",
+          "source_row": 161,
+          "name": "10-Autorizaciones  de Descuentos Por Prestamos"
+        },
+        {
+          "source_code": "xlsx-row-162",
+          "source_row": 162,
+          "name": "11-Autorizaciones  de Tratamiento De Datos."
+        },
+        {
+          "source_code": "xlsx-row-163",
+          "source_row": 163,
+          "name": "12 -Autorizacion de Practica de Evaluaciones Medicas."
+        },
+        {
+          "source_code": "xlsx-row-164",
+          "source_row": 164,
+          "name": "13 -Autorizacion de Tratamiento de Datos Video Vigilancia."
+        }
+      ],
+      "sort_order": 10
+    },
+    {
+      "source_row": 166,
+      "number": "4.5",
+      "code": "4.5-contratacion-de-prestacion-de-servicios",
+      "parent_code": "4",
+      "name": "CONTRATACION DE PRESTACION DE SERVICIOS.",
+      "documents": [
+        {
+          "source_code": "xlsx-row-167",
+          "source_row": 167,
+          "name": "Manual de Contratación Segura de Prestadores de Servicios"
+        },
+        {
+          "source_code": "xlsx-row-168",
+          "source_row": 168,
+          "name": "ARCHIVO DE TRABAJADORES/ ARCHIVO PLANO"
+        },
+        {
+          "source_code": "xlsx-row-169",
+          "source_row": 169,
+          "name": "Contrato  (OPS) Minutas"
+        },
+        {
+          "source_code": "xlsx-row-170",
+          "source_row": 170,
+          "name": "Contratos de Obra civil.Minuta"
+        },
+        {
+          "source_code": "xlsx-row-171",
+          "source_row": 171,
+          "name": "Contratistas Bajos ingresos.Minuta"
+        },
+        {
+          "source_code": "xlsx-row-172",
+          "source_row": 172,
+          "name": "Comerciales Externos.Minuta"
+        },
+        {
+          "source_code": "xlsx-row-173",
+          "source_row": 173,
+          "name": "Procedimiento de selección y evaluación de contratistas"
+        },
+        {
+          "source_code": "xlsx-row-174",
+          "source_row": 174,
+          "name": "Formato de solicitud y autorización del servicio"
+        },
+        {
+          "source_code": "xlsx-row-175",
+          "source_row": 175,
+          "name": "Formato de registro y datos del contratista"
+        },
+        {
+          "source_code": "xlsx-row-176",
+          "source_row": 176,
+          "name": "Lista de chequeo de documentos del contratista"
+        },
+        {
+          "source_code": "xlsx-row-177",
+          "source_row": 177,
+          "name": "Formato de evaluación de idoneidad y experiencia"
+        },
+        {
+          "source_code": "xlsx-row-178",
+          "source_row": 178,
+          "name": "Minuta de contrato de prestación de servicios"
+        },
+        {
+          "source_code": "xlsx-row-179",
+          "source_row": 179,
+          "name": "Anexo técnico o alcance del servicio"
+        },
+        {
+          "source_code": "xlsx-row-180",
+          "source_row": 180,
+          "name": "Matriz de obligaciones y responsabilidades contractuales"
+        },
+        {
+          "source_code": "xlsx-row-181",
+          "source_row": 181,
+          "name": "Declaración de independencia y autonomía del contratista"
+        },
+        {
+          "source_code": "xlsx-row-182",
+          "source_row": 182,
+          "name": "Acuerdo de confidencialidad y protección de información"
+        },
+        {
+          "source_code": "xlsx-row-183",
+          "source_row": 183,
+          "name": "Acuerdo de tratamiento de datos personales"
+        },
+        {
+          "source_code": "xlsx-row-184",
+          "source_row": 184,
+          "name": "Formato de entrega de documentos, activos o accesos"
+        },
+        {
+          "source_code": "xlsx-row-185",
+          "source_row": 185,
+          "name": "Lista de chequeo de seguridad social del contratista"
+        },
+        {
+          "source_code": "xlsx-row-186",
+          "source_row": 186,
+          "name": "Lista de chequeo de requisitos de SST para contratistas"
+        },
+        {
+          "source_code": "xlsx-row-187",
+          "source_row": 187,
+          "name": "Matriz de control de vigencia contractual SOFWARE"
+        },
+        {
+          "source_code": "xlsx-row-188",
+          "source_row": 188,
+          "name": "Formato de informe de actividades o avance del servicio"
+        },
+        {
+          "source_code": "xlsx-row-189",
+          "source_row": 189,
+          "name": "Acta de entrega y recibo de productos o servicios"
+        },
+        {
+          "source_code": "xlsx-row-190",
+          "source_row": 190,
+          "name": "Formato de aprobación de cuenta de cobro o factura"
+        },
+        {
+          "source_code": "xlsx-row-191",
+          "source_row": 191,
+          "name": "Matriz de pagos y obligaciones económicas"
+        },
+        {
+          "source_code": "xlsx-row-192",
+          "source_row": 192,
+          "name": "Formato de reporte de incumplimientos contractuales"
+        },
+        {
+          "source_code": "xlsx-row-193",
+          "source_row": 193,
+          "name": "Modelo de requerimiento por incumplimiento"
+        },
+        {
+          "source_code": "xlsx-row-194",
+          "source_row": 194,
+          "name": "Formato de modificación, adición o prórroga"
+        },
+        {
+          "source_code": "xlsx-row-195",
+          "source_row": 195,
+          "name": "Acta de terminación y liquidación contractual, cuando aplique"
+        },
+        {
+          "source_code": "xlsx-row-196",
+          "source_row": 196,
+          "name": "Acta de devolución de bienes y cierre de accesos"
+        },
+        {
+          "source_code": "xlsx-row-197",
+          "source_row": 197,
+          "name": "Lista de chequeo de cierre del expediente"
+        }
+      ],
+      "sort_order": 11
+    },
+    {
+      "source_row": 199,
+      "number": "5",
+      "code": "5",
+      "parent_code": null,
+      "name": "SISTEMA ADMINISTRATIVO DE PERSONAL",
+      "documents": [
+        {
+          "source_code": "xlsx-row-200",
+          "source_row": 200,
+          "name": "Manual Corporativo  De Admistracion de Personal."
+        },
+        {
+          "source_code": "xlsx-row-201",
+          "source_row": 201,
+          "name": "Gestion de Nomina y Prestaciones Sociales"
+        },
+        {
+          "source_code": "xlsx-row-202",
+          "source_row": 202,
+          "name": "Gestion de Seguridad Social."
+        },
+        {
+          "source_code": "xlsx-row-203",
+          "source_row": 203,
+          "name": "Gestion de Incapacidades."
+        },
+        {
+          "source_code": "xlsx-row-204",
+          "source_row": 204,
+          "name": "Gestion de Turnos y horarios."
+        },
+        {
+          "source_code": "xlsx-row-205",
+          "source_row": 205,
+          "name": "Gestion Documental."
+        }
+      ],
+      "sort_order": 12
+    },
+    {
+      "source_row": 210,
+      "number": "5.1",
+      "code": "5.1-nomina-estructura-salarial",
+      "parent_code": "5",
+      "name": "NOMINA/ ESTRUCTURA SALARIAL",
+      "documents": [
+        {
+          "source_code": "xlsx-row-211",
+          "source_row": 211,
+          "name": "Manual Corporativo  De IMPLEMENTACION DE Nomina"
+        },
+        {
+          "source_code": "xlsx-row-212",
+          "source_row": 212,
+          "name": "Nómina Detallada( Archivo Plano)"
+        },
+        {
+          "source_code": "xlsx-row-213",
+          "source_row": 213,
+          "name": "SUC 1"
+        },
+        {
+          "source_code": "xlsx-row-214",
+          "source_row": 214,
+          "name": "SUC 2"
+        },
+        {
+          "source_code": "xlsx-row-215",
+          "source_row": 215,
+          "name": "SUC 3"
+        },
+        {
+          "source_code": "xlsx-row-216",
+          "source_row": 216,
+          "name": "Pagos NO constitutivos de salario.(Formato)"
+        },
+        {
+          "source_code": "xlsx-row-217",
+          "source_row": 217,
+          "name": "Autoizacion de Pagos No constitutivos de Salrio"
+        },
+        {
+          "source_code": "xlsx-row-218",
+          "source_row": 218,
+          "name": "Autorización de descuentos por parte de trabajadores"
+        }
+      ],
+      "sort_order": 13
+    },
+    {
+      "source_row": 222,
+      "number": "5.2",
+      "code": "5.2-prestaciones-sociales",
+      "parent_code": "5",
+      "name": "PRESTACIONES SOCIALES.",
+      "documents": [
+        {
+          "source_code": "xlsx-row-223",
+          "source_row": 223,
+          "name": "Manual Corporativo  De Pago de Prestaciones."
+        },
+        {
+          "source_code": "xlsx-row-224",
+          "source_row": 224,
+          "name": "Cesantias."
+        },
+        {
+          "source_code": "xlsx-row-225",
+          "source_row": 225,
+          "name": "Porceso para  EL RETIRO de Cesantias."
+        },
+        {
+          "source_code": "xlsx-row-226",
+          "source_row": 226,
+          "name": "Intereses de Cesantias"
+        },
+        {
+          "source_code": "xlsx-row-227",
+          "source_row": 227,
+          "name": "Primas De Servicios."
+        },
+        {
+          "source_code": "xlsx-row-228",
+          "source_row": 228,
+          "name": "Formato de pago de Prima De Servicios."
+        },
+        {
+          "source_code": "xlsx-row-229",
+          "source_row": 229,
+          "name": "Vacaciones( Archivo)"
+        },
+        {
+          "source_code": "xlsx-row-230",
+          "source_row": 230,
+          "name": "Registro de vacaciones Individual Por Trabajador"
+        },
+        {
+          "source_code": "xlsx-row-231",
+          "source_row": 231,
+          "name": "Cronograma  y control de vacaciones anual"
+        },
+        {
+          "source_code": "xlsx-row-232",
+          "source_row": 232,
+          "name": "Formato de Solcitud de Vacaciones"
+        },
+        {
+          "source_code": "xlsx-row-233",
+          "source_row": 233,
+          "name": "Formato de Solcitud de Vacaciones mixtas."
+        },
+        {
+          "source_code": "xlsx-row-234",
+          "source_row": 234,
+          "name": "Evidencia de Concesión de Vacaciones."
+        },
+        {
+          "source_code": "xlsx-row-235",
+          "source_row": 235,
+          "name": "Registro de compensación de vacaciones."
+        },
+        {
+          "source_code": "xlsx-row-236",
+          "source_row": 236,
+          "name": "Dotacion Formato Entrega(Formato)"
+        },
+        {
+          "source_code": "xlsx-row-237",
+          "source_row": 237,
+          "name": "Control de Entrega de Dotaciones,"
+        },
+        {
+          "source_code": "xlsx-row-238",
+          "source_row": 238,
+          "name": "Formato de entrega de dotaciones"
+        }
+      ],
+      "sort_order": 14
+    },
+    {
+      "source_row": 242,
+      "number": "5.3",
+      "code": "5.3-gestion-de-seguridad-social",
+      "parent_code": "5",
+      "name": "GESTION DE SEGURIDAD SOCIAL",
+      "documents": [
+        {
+          "source_code": "xlsx-row-243",
+          "source_row": 243,
+          "name": "Manual Corporativo  De GESTION de Seguridad Social."
+        },
+        {
+          "source_code": "xlsx-row-244",
+          "source_row": 244,
+          "name": "PLANILLA UNICA DE LIQUIDACION DE APORTES."
+        },
+        {
+          "source_code": "xlsx-row-245",
+          "source_row": 245,
+          "name": "ARL"
+        },
+        {
+          "source_code": "xlsx-row-246",
+          "source_row": 246,
+          "name": "SALUD"
+        },
+        {
+          "source_code": "xlsx-row-247",
+          "source_row": 247,
+          "name": "PESION"
+        },
+        {
+          "source_code": "xlsx-row-248",
+          "source_row": 248,
+          "name": "CAJA DE COMPESACION"
+        },
+        {
+          "source_code": "xlsx-row-249",
+          "source_row": 249,
+          "name": "TRABADORES DE TIEMPO PARCIAL"
+        },
+        {
+          "source_code": "xlsx-row-250",
+          "source_row": 250,
+          "name": "COTIZANTE BAJOS INGRESOS."
+        },
+        {
+          "source_code": "xlsx-row-251",
+          "source_row": 251,
+          "name": "PRESTADORES DE SERVICIOS."
+        }
+      ],
+      "sort_order": 15
+    },
+    {
+      "source_row": 257,
+      "number": "5.4",
+      "code": "5.4-gestion-de-incapacidades",
+      "parent_code": "5",
+      "name": "GESTION DE INCAPACIDADES",
+      "documents": [
+        {
+          "source_code": "xlsx-row-258",
+          "source_row": 258,
+          "name": "Manual Corporativo  De GESTION de INCAPACIDADES."
+        },
+        {
+          "source_code": "xlsx-row-259",
+          "source_row": 259,
+          "name": "INCAPCIDADES DE ORIGEN COMUN"
+        },
+        {
+          "source_code": "xlsx-row-260",
+          "source_row": 260,
+          "name": "INCAPACIDADES DE ORIGEN LABORAL"
+        },
+        {
+          "source_code": "xlsx-row-261",
+          "source_row": 261,
+          "name": "RADICACION Y COBRO DE INCAPACIDADES"
+        },
+        {
+          "source_code": "xlsx-row-262",
+          "source_row": 262,
+          "name": "SEGUIMIENTO A TRABAJADORES INCAPACITADOS,"
+        },
+        {
+          "source_code": "xlsx-row-263",
+          "source_row": 263,
+          "name": "REINTEGRO LABORAL CON RECOMENDACIONES"
+        },
+        {
+          "source_code": "xlsx-row-264",
+          "source_row": 264,
+          "name": "REINTEGRO LABORAL CON REUBICACION"
+        },
+        {
+          "source_code": "xlsx-row-265",
+          "source_row": 265,
+          "name": "Acciones Constitucionel Por No Pago de Incapcidades."
+        }
+      ],
+      "sort_order": 16
+    },
+    {
+      "source_row": 268,
+      "number": "5.5",
+      "code": "5.5-fueros-laborales-y-estabilidad-laboral",
+      "parent_code": "5",
+      "name": "FUEROS LABORALES Y ESTABILIDAD LABORAL",
+      "documents": [
+        {
+          "source_code": "xlsx-row-269",
+          "source_row": 269,
+          "name": "Manual Corporativo  De Gestion De Estabilida Laboral Reforzada"
+        },
+        {
+          "source_code": "xlsx-row-270",
+          "source_row": 270,
+          "name": "Estabillidad  por Maternidad."
+        },
+        {
+          "source_code": "xlsx-row-271",
+          "source_row": 271,
+          "name": "Estabillidad  por Paternidad."
+        },
+        {
+          "source_code": "xlsx-row-272",
+          "source_row": 272,
+          "name": "Estabilidad por Salud."
+        },
+        {
+          "source_code": "xlsx-row-273",
+          "source_row": 273,
+          "name": "Estabilida De prepensionado"
+        }
+      ],
+      "sort_order": 17
+    },
+    {
+      "source_row": 277,
+      "number": "5.6",
+      "code": "5.5-gestion-de-turno-y-horarios-laborales",
+      "parent_code": "5",
+      "name": "GESTION DE TURNO Y HORARIOS LABORALES",
+      "documents": [
+        {
+          "source_code": "xlsx-row-278",
+          "source_row": 278,
+          "name": "Manual Corporativo  De Gestion de Turnos"
+        },
+        {
+          "source_code": "xlsx-row-279",
+          "source_row": 279,
+          "name": "MODELO DE FORMATO DE TURNOS"
+        },
+        {
+          "source_code": "xlsx-row-280",
+          "source_row": 280,
+          "name": "Formato de Notificacion de Horarios."
+        },
+        {
+          "source_code": "xlsx-row-281",
+          "source_row": 281,
+          "name": "Autorizacion de trabajo suplementario."
+        }
+      ],
+      "sort_order": 18
+    },
+    {
+      "source_row": 285,
+      "number": "5.7",
+      "code": "5.5-gestion-documental-del-proceso",
+      "parent_code": "5",
+      "name": "GESTION DOCUMENTAL DEL PROCESO",
+      "documents": [
+        {
+          "source_code": "xlsx-row-286",
+          "source_row": 286,
+          "name": "Manual Corporativo  De Gestion Documental."
+        },
+        {
+          "source_code": "xlsx-row-287",
+          "source_row": 287,
+          "name": "ARCHIVO FISICO."
+        },
+        {
+          "source_code": "xlsx-row-288",
+          "source_row": 288,
+          "name": "ARCHIVO DIGITAL"
+        },
+        {
+          "source_code": "xlsx-row-289",
+          "source_row": 289,
+          "name": "FIRMAS FISICAS"
+        },
+        {
+          "source_code": "xlsx-row-290",
+          "source_row": 290,
+          "name": "FIRMAS ELECTRONICAS."
+        }
+      ],
+      "sort_order": 19
+    },
+    {
+      "source_row": 293,
+      "number": "6",
+      "code": "6",
+      "parent_code": null,
+      "name": "SISTEMA SEGUIMIENTO Y CONTROL",
+      "documents": [
+        {
+          "source_code": "xlsx-row-294",
+          "source_row": 294,
+          "name": "Manual Corporativo De SEGUIMIENTO De Personal."
+        },
+        {
+          "source_code": "xlsx-row-295",
+          "source_row": 295,
+          "name": "Seguiento de Periodo de Prueba"
+        },
+        {
+          "source_code": "xlsx-row-296",
+          "source_row": 296,
+          "name": "SeguiemInto Ordinario de Desempeño"
+        },
+        {
+          "source_code": "xlsx-row-297",
+          "source_row": 297,
+          "name": "Seguimiento Extar ordinario Por incumpliento o Bajo Desempeño."
+        },
+        {
+          "source_code": "xlsx-row-298",
+          "source_row": 298,
+          "name": "Evaluciones de desempeño."
+        },
+        {
+          "source_code": "xlsx-row-299",
+          "source_row": 299,
+          "name": "Formato de Notifricacion de Infracion o Bajo Desempeño"
+        },
+        {
+          "source_code": "xlsx-row-300",
+          "source_row": 300,
+          "name": "Formato de memornados y llamadoa de atencion."
+        },
+        {
+          "source_code": "xlsx-row-301",
+          "source_row": 301,
+          "name": "Estructura de liderazgo"
+        },
+        {
+          "source_code": "xlsx-row-302",
+          "source_row": 302,
+          "name": "Personal de Direccion Manejo y Confianza.AUTORIDAD."
+        },
+        {
+          "source_code": "xlsx-row-303",
+          "source_row": 303,
+          "name": "Acta de  Seguimiento y Compromisos."
+        },
+        {
+          "source_code": "xlsx-row-304",
+          "source_row": 304,
+          "name": "Acta de Notificacion de inicio de procedimiento.Motivada."
+        },
+        {
+          "source_code": "xlsx-row-305",
+          "source_row": 305,
+          "name": "Acta de Entreg de Material Probatorio."
+        },
+        {
+          "source_code": "xlsx-row-306",
+          "source_row": 306,
+          "name": "Acat De Recepcion Del Area Encargada."
+        }
+      ],
+      "sort_order": 20
+    },
+    {
+      "source_row": 310,
+      "number": "7",
+      "code": "7",
+      "parent_code": null,
+      "name": "SISTEMA TERMINACION DE CONTRATOS",
+      "documents": [
+        {
+          "source_code": "xlsx-row-311",
+          "source_row": 311,
+          "name": "Manual Corporativo De TERMINACION De Contratos."
+        },
+        {
+          "source_code": "xlsx-row-312",
+          "source_row": 312,
+          "name": "Procedimiento Disciplinario Estructurado"
+        },
+        {
+          "source_code": "xlsx-row-313",
+          "source_row": 313,
+          "name": "Debido Proceso,"
+        },
+        {
+          "source_code": "xlsx-row-314",
+          "source_row": 314,
+          "name": "Formato de Notificacion de Inico de Procedimento Discilplinario"
+        },
+        {
+          "source_code": "xlsx-row-315",
+          "source_row": 315,
+          "name": "Formato de"
+        },
+        {
+          "source_code": "xlsx-row-316",
+          "source_row": 316,
+          "name": "Formato de"
+        },
+        {
+          "source_code": "xlsx-row-317",
+          "source_row": 317,
+          "name": "Formato de"
+        },
+        {
+          "source_code": "xlsx-row-318",
+          "source_row": 318,
+          "name": "Formato de"
+        },
+        {
+          "source_code": "xlsx-row-319",
+          "source_row": 319,
+          "name": "Formato de"
+        },
+        {
+          "source_code": "xlsx-row-320",
+          "source_row": 320,
+          "name": "Estadisticas De Terminacion ultimo Año."
+        },
+        {
+          "source_code": "xlsx-row-321",
+          "source_row": 321,
+          "name": "Por Justa Causa."
+        },
+        {
+          "source_code": "xlsx-row-322",
+          "source_row": 322,
+          "name": "Sin Justa Causa"
+        },
+        {
+          "source_code": "xlsx-row-323",
+          "source_row": 323,
+          "name": "Retiro Voluntario."
+        },
+        {
+          "source_code": "xlsx-row-324",
+          "source_row": 324,
+          "name": "Registro y Documentacion de Proceso Disciplinarios."
+        },
+        {
+          "source_code": "xlsx-row-325",
+          "source_row": 325,
+          "name": "Encuesta de Satifaccion Posretiro."
+        },
+        {
+          "source_code": "xlsx-row-326",
+          "source_row": 326,
+          "name": "Archivo Documental de Porcesos"
+        }
+      ],
+      "sort_order": 21
+    },
+    {
+      "source_row": 329,
+      "number": "8",
+      "code": "8",
+      "parent_code": null,
+      "name": "PROMOCION Y DESARROLLO",
+      "documents": [
+        {
+          "source_code": "xlsx-row-330",
+          "source_row": 330,
+          "name": "Manual Corporativo  y Politica De Bienestar"
+        },
+        {
+          "source_code": "xlsx-row-331",
+          "source_row": 331,
+          "name": "Escaler de valor y ascensos."
+        },
+        {
+          "source_code": "xlsx-row-332",
+          "source_row": 332,
+          "name": "🎓 Capacitación"
+        },
+        {
+          "source_code": "xlsx-row-333",
+          "source_row": 333,
+          "name": "Incentivos."
+        },
+        {
+          "source_code": "xlsx-row-334",
+          "source_row": 334,
+          "name": "Cronograma de Capacitaciones."
+        },
+        {
+          "source_code": "xlsx-row-335",
+          "source_row": 335,
+          "name": "Capacitacion 1"
+        },
+        {
+          "source_code": "xlsx-row-336",
+          "source_row": 336,
+          "name": "Capacitacion 2"
+        },
+        {
+          "source_code": "xlsx-row-337",
+          "source_row": 337,
+          "name": "Capacitacion 3"
+        },
+        {
+          "source_code": "xlsx-row-338",
+          "source_row": 338,
+          "name": "Capacitacion 4"
+        },
+        {
+          "source_code": "xlsx-row-339",
+          "source_row": 339,
+          "name": "Capacitacion 5"
+        }
+      ],
+      "sort_order": 22
+    },
+    {
+      "source_row": 341,
+      "number": "9",
+      "code": "9",
+      "parent_code": null,
+      "name": "VISITA DEL  DEL MINISTERIO DE TRABAJO",
+      "documents": [
+        {
+          "source_code": "xlsx-row-342",
+          "source_row": 342,
+          "name": "CHECK LIST DE VERIFICACION"
+        }
+      ],
+      "sort_order": 23
+    },
+    {
+      "source_row": 349,
+      "number": "10",
+      "code": "10",
+      "parent_code": null,
+      "name": "SEGUIEMIENTO A ENTREGA",
+      "documents": [
+        {
+          "source_code": "xlsx-row-350",
+          "source_row": 350,
+          "name": "FECHA DE SOLICITUD"
+        },
+        {
+          "source_code": "xlsx-row-351",
+          "source_row": 351,
+          "name": "FECHA DE ENVIO"
+        },
+        {
+          "source_code": "xlsx-row-352",
+          "source_row": 352,
+          "name": "FECHA DE ANALSIS"
+        },
+        {
+          "source_code": "xlsx-row-353",
+          "source_row": 353,
+          "name": "PERSONA ASIGNADA"
+        },
+        {
+          "source_code": "xlsx-row-354",
+          "source_row": 354,
+          "name": "ECUENTROS."
+        }
+      ],
+      "sort_order": 24
+    }
+  ]
+}
