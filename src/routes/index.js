@@ -17,6 +17,7 @@ import personasRoutes from './personas.routes.js'
 import gastosRoutes from './gastos.routes.js'
 import usuariosRoutes from './usuarios.routes.js'
 import informesRoutes from './informes.routes.js'
+import iaRoutes from './ia.routes.js'
 import auditoriasRoutes from './auditorias.routes.js'
 import maestrosRoutes from './maestros.routes.js'
 import ventasRoutes from './ventas.routes.js'
@@ -41,6 +42,7 @@ router.use('/personas', personasRoutes)
 router.use('/gastos', gastosRoutes)
 router.use('/usuarios', usuariosRoutes)
 router.use('/informes', informesRoutes)
+router.use('/ia', iaRoutes)
 router.use('/auditorias', auditoriasRoutes)
 router.use('/maestros', maestrosRoutes)
 router.use('/ventas', ventasRoutes)

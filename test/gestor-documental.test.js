@@ -29,6 +29,18 @@ async function uploadDocument(token, fields) {
   return { status: response.status, data: await response.json().catch(() => null) }
 }
 
+async function uploadSolicitudGestor(token, solicitudId, catalogoId) {
+  const base = await startApp()
+  const form = new FormData()
+  form.append('file', new Blob(['documento entregado por SoyAsesorias'], { type: 'application/pdf' }), 'entrega-paquete.pdf')
+  const response = await fetch(`${base}/solicitudes/${solicitudId}/gestor-documentos/${catalogoId}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  })
+  return { status: response.status, data: await response.json().catch(() => null) }
+}
+
 test('admin organiza carpetas y archivos del gestor documental con validacion de carpeta', async () => {
   const admin = await loginAs(ADMIN)
   const empresa = await db('empresas').first('id')
@@ -300,12 +312,52 @@ test('importa categorías del Excel y habilita un usuario aislado de Gestor Docu
   }, { token: login.data.token })
   assert.equal(packageRequest.status, 201)
   solicitudIds.push(packageRequest.data.solicitud.id)
+  const packageItems = await api.get(
+    `/solicitudes/${packageRequest.data.solicitud.id}/gestor-documentos`,
+    { token: login.data.token }
+  )
+  assert.equal(packageItems.status, 200)
+  assert.ok(packageItems.data.data.length > 1, 'el paquete debe mostrar los documentos de la categoría')
+  assert.equal(packageItems.data.entregados, 0)
+
+  const firstRequestedItem = packageItems.data.data[0]
+  const delivered = await uploadSolicitudGestor(admin.token, packageRequest.data.solicitud.id, firstRequestedItem.catalogo_id)
+  assert.equal(delivered.status, 201, JSON.stringify(delivered.data))
+  const deliveryRow = await db('gestor_documental_entregas').where('id', delivered.data.entrega.id).first()
+  uploadedPaths.push(resolve(process.env.STORAGE_DIR || 'storage/documentos', deliveryRow.path))
+
+  const packageAfterDelivery = await api.get(
+    `/solicitudes/${packageRequest.data.solicitud.id}/gestor-documentos`,
+    { token: login.data.token }
+  )
+  assert.equal(packageAfterDelivery.data.entregados, 1)
+  const deliveredDocument = packageAfterDelivery.data.data.find(item => item.catalogo_id === firstRequestedItem.catalogo_id)
+  assert.equal(deliveredDocument.entregado, true)
+  const catalogAfterDelivery = await api.get(`/gestor-documental/catalogo?empresa_id=${empresa.id}`, { token: login.data.token })
+  const deliveredInCatalog = catalogAfterDelivery.data.documentos.find(d => d.id === firstRequestedItem.catalogo_id)
+  assert.equal(deliveredInCatalog.cargado, true)
+  assert.equal(deliveredInCatalog.entrega_solicitud_id, packageRequest.data.solicitud.id)
+
+  const deliveredBlob = await fetch(
+    `${await startApp()}/solicitudes/${packageRequest.data.solicitud.id}/gestor-documentos/${firstRequestedItem.catalogo_id}/download`,
+    { headers: { Authorization: `Bearer ${login.data.token}` } }
+  )
+  assert.equal(deliveredBlob.status, 200)
+  assert.equal(await deliveredBlob.text(), 'documento entregado por SoyAsesorias')
+
   const itemRequest = await api.post('/gestor-documental/solicitudes', {
     tipo_solicitud: 'gestor_documento',
     catalogo_id: item.id,
   }, { token: login.data.token })
   assert.equal(itemRequest.status, 201)
   solicitudIds.push(itemRequest.data.solicitud.id)
+  const individualItems = await api.get(
+    `/solicitudes/${itemRequest.data.solicitud.id}/gestor-documentos`,
+    { token: login.data.token }
+  )
+  assert.equal(individualItems.status, 200)
+  assert.equal(individualItems.data.total, 1)
+  assert.equal(individualItems.data.data[0].catalogo_id, item.id)
   const visibleRequests = await api.get('/solicitudes', { token: login.data.token })
   assert.ok(visibleRequests.data.data.some(s => s.id === packageRequest.data.solicitud.id))
   assert.ok(visibleRequests.data.data.some(s => s.id === itemRequest.data.solicitud.id))
@@ -320,6 +372,8 @@ test.after(async () => {
   for (const id of solicitudIds) {
     await db('notificaciones').where('solicitud_id', id).delete()
     await db('servicio_registros').where('solicitud_id', id).delete()
+    await db('gestor_documental_entregas').where('solicitud_id', id).delete()
+    await db('gestor_documental_solicitud_items').where('solicitud_id', id).delete()
     await db('solicitudes').where('id', id).delete()
   }
   if (archivoIds.length) await db('gestor_documental_archivos').whereIn('id', archivoIds).delete()

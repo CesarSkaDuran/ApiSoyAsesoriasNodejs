@@ -1,4 +1,5 @@
 import db from '../db/knex.js'
+import { consultarInformeSolicitudes } from '../services/informe-solicitudes.js'
 
 // Informes administrativos (solo admin):
 //  GET /informes/ingresos?desde=&hasta=&agrupar=dia|cliente
@@ -136,6 +137,47 @@ export async function servicios(req, res) {
     .orderBy('registros', 'desc')
 
   res.json({ data })
+}
+
+// Informe de solicitudes: resumen, tendencias, estados, tipos y clientes.
+// tipo_cliente permite separar empresas/independientes y los IDs filtran un
+// cliente puntual dentro del tipo seleccionado.
+export async function solicitudes(req, res) {
+  const { desde, hasta } = rango(req)
+  if (req.query.tipo_cliente && !['todos', 'empresa', 'independiente'].includes(req.query.tipo_cliente)) {
+    return res.status(400).json({ error: 'tipo_cliente debe ser todos, empresa o independiente' })
+  }
+  const tipoCliente = ['empresa', 'independiente'].includes(req.query.tipo_cliente)
+    ? req.query.tipo_cliente
+    : 'todos'
+  const empresaId = req.query.empresa_id ? Number(req.query.empresa_id) : null
+  const personaId = req.query.persona_id ? Number(req.query.persona_id) : null
+  if ((req.query.empresa_id && (!Number.isInteger(empresaId) || empresaId < 1))
+    || (req.query.persona_id && (!Number.isInteger(personaId) || personaId < 1))) {
+    return res.status(400).json({ error: 'El filtro de cliente no es válido' })
+  }
+  res.json(await consultarInformeSolicitudes({ desde, hasta, tipoCliente, empresaId, personaId }))
+}
+
+export async function clientesSolicitudes(req, res) {
+  const [empresas, independientes] = await Promise.all([
+    db('empresas')
+      .select('id', 'razon_social as nombre')
+      .orderBy('razon_social'),
+    db('personas')
+      .where('es_independiente', true)
+      .select(
+        'id',
+        db.raw("CONCAT_WS(' ', primer_nombre, primer_apellido) as nombre"),
+      )
+      .orderBy('primer_nombre'),
+  ])
+  res.json({
+    data: [
+      ...empresas.map(e => ({ id: `e:${e.id}`, nombre: e.nombre, tipo: 'empresa' })),
+      ...independientes.map(p => ({ id: `p:${p.id}`, nombre: `${p.nombre} (independiente)`, tipo: 'independiente' })),
+    ],
+  })
 }
 
 // Resumen del cliente logueado (empresa o independiente) para su home.

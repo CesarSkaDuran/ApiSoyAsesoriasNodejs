@@ -97,7 +97,7 @@ export function requireModulo(modulo) {
     const modulos = req.user.modulos || {}
     // El catálogo documental contiene borradores y archivos privados; exige
     // asignación explícita incluso para cuentas antiguas sin fila de permisos.
-    if (modulo === 'gestor_documental' && !modulos.gestor_documental) {
+    if (['gestor_documental', 'ia'].includes(modulo) && !modulos[modulo]) {
       return res.status(403).json({
         error: 'Este modulo no esta habilitado para tu cuenta. Debes solicitar el acceso al administrador.',
         modulo,

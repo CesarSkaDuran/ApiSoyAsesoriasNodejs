@@ -115,6 +115,45 @@ CREATE TABLE IF NOT EXISTS `gestor_documental_archivos` (
   KEY `gda_empresa_catalogo_id_idx` (`empresa_id`, `catalogo_id`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Snapshot de los documentos solicitados en paquetes o solicitudes individuales.
+CREATE TABLE IF NOT EXISTS `gestor_documental_solicitud_items` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `solicitud_id` INT UNSIGNED NOT NULL,
+  `catalogo_id` INT UNSIGNED NOT NULL,
+  `categoria_id` INT UNSIGNED NOT NULL,
+  `nombre` VARCHAR(255) NOT NULL,
+  `orden` INT NOT NULL DEFAULT 0,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `gds_items_solicitud_catalogo_unique` (`solicitud_id`, `catalogo_id`),
+  KEY `gestor_documental_solicitud_items_solicitud_id_index` (`solicitud_id`),
+  KEY `gestor_documental_solicitud_items_catalogo_id_index` (`catalogo_id`),
+  KEY `gestor_documental_solicitud_items_categoria_id_index` (`categoria_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Entregas del administrador por documento solicitado; conserva historial.
+CREATE TABLE IF NOT EXISTS `gestor_documental_entregas` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `solicitud_id` INT UNSIGNED NOT NULL,
+  `solicitud_item_id` INT UNSIGNED NOT NULL,
+  `catalogo_id` INT UNSIGNED NOT NULL,
+  `empresa_id` INT UNSIGNED NOT NULL,
+  `uploaded_by` INT UNSIGNED NULL,
+  `nombre` VARCHAR(255) NOT NULL,
+  `path` VARCHAR(500) NOT NULL,
+  `mime` VARCHAR(100) NULL,
+  `size` INT UNSIGNED NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `gestor_documental_entregas_solicitud_id_index` (`solicitud_id`),
+  KEY `gestor_documental_entregas_solicitud_item_id_index` (`solicitud_item_id`),
+  KEY `gestor_documental_entregas_catalogo_id_index` (`catalogo_id`),
+  KEY `gestor_documental_entregas_empresa_id_index` (`empresa_id`),
+  KEY `gde_solicitud_catalogo_id_idx` (`solicitud_id`, `catalogo_id`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Relacion de solicitudes del modulo.
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=@schema_name AND TABLE_NAME='solicitudes' AND COLUMN_NAME='gestor_categoria_id')=0, 'ALTER TABLE `solicitudes` ADD COLUMN `gestor_categoria_id` INT UNSIGNED NULL', 'SELECT 1');
 PREPARE gestor_ddl FROM @sql; EXECUTE gestor_ddl; DEALLOCATE PREPARE gestor_ddl;
@@ -404,6 +443,20 @@ INSERT INTO `gestor_documental_catalogo` (`source_code`,`categoria_id`,`nombre`,
 INSERT INTO `gestor_documental_catalogo` (`source_code`,`categoria_id`,`nombre`,`orden`,`activo`,`created_at`,`updated_at`) SELECT 'xlsx-row-352',(SELECT `id` FROM `gestor_documental_categorias` WHERE `codigo`='10' LIMIT 1),'FECHA DE ANALSIS',3,1,NOW(),NOW() WHERE NOT EXISTS (SELECT 1 FROM `gestor_documental_catalogo` WHERE `source_code`='xlsx-row-352');
 INSERT INTO `gestor_documental_catalogo` (`source_code`,`categoria_id`,`nombre`,`orden`,`activo`,`created_at`,`updated_at`) SELECT 'xlsx-row-353',(SELECT `id` FROM `gestor_documental_categorias` WHERE `codigo`='10' LIMIT 1),'PERSONA ASIGNADA',4,1,NOW(),NOW() WHERE NOT EXISTS (SELECT 1 FROM `gestor_documental_catalogo` WHERE `source_code`='xlsx-row-353');
 INSERT INTO `gestor_documental_catalogo` (`source_code`,`categoria_id`,`nombre`,`orden`,`activo`,`created_at`,`updated_at`) SELECT 'xlsx-row-354',(SELECT `id` FROM `gestor_documental_categorias` WHERE `codigo`='10' LIMIT 1),'ECUENTROS.',5,1,NOW(),NOW() WHERE NOT EXISTS (SELECT 1 FROM `gestor_documental_catalogo` WHERE `source_code`='xlsx-row-354');
+
+-- Backfill de solicitudes Gestor existentes: captura el contenido solicitado.
+INSERT INTO `gestor_documental_solicitud_items` (`solicitud_id`,`catalogo_id`,`categoria_id`,`nombre`,`orden`,`created_at`,`updated_at`)
+SELECT s.id,d.id,d.categoria_id,d.nombre,1,NOW(),NOW()
+FROM `solicitudes` s JOIN `gestor_documental_catalogo` d ON d.id=s.gestor_catalogo_id
+WHERE s.tipo_solicitud='gestor_documento' AND s.gestor_catalogo_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM `gestor_documental_solicitud_items` i WHERE i.solicitud_id=s.id AND i.catalogo_id=d.id);
+INSERT INTO `gestor_documental_solicitud_items` (`solicitud_id`,`catalogo_id`,`categoria_id`,`nombre`,`orden`,`created_at`,`updated_at`)
+SELECT s.id,d.id,d.categoria_id,d.nombre,d.orden,NOW(),NOW()
+FROM `solicitudes` s
+JOIN `gestor_documental_categorias` c ON c.id=s.gestor_categoria_id OR c.parent_id=s.gestor_categoria_id
+JOIN `gestor_documental_catalogo` d ON d.categoria_id=c.id
+WHERE s.tipo_solicitud='gestor_paquete' AND s.gestor_categoria_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM `gestor_documental_solicitud_items` i WHERE i.solicitud_id=s.id AND i.catalogo_id=d.id);
 
 -- Normaliza dos subcategorias que el Excel numeraba ambas como 5.5.
 UPDATE `gestor_documental_categorias` SET `numero`='5.6' WHERE `codigo`='5.5-gestion-de-turno-y-horarios-laborales' AND `numero`='5.5';

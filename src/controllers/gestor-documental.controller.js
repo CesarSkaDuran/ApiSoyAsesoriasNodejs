@@ -321,10 +321,16 @@ export async function deleteDocument(req, res) {
   res.json({ message: 'Documento eliminado' })
 }
 
+function isEntregaMasReciente(archivo, entrega) {
+  if (!entrega) return false
+  if (!archivo) return true
+  return new Date(entrega.created_at).getTime() >= new Date(archivo.created_at).getTime()
+}
+
 export async function listCatalog(req, res) {
   const empresaId = await validarEmpresa(req, res, req.query.empresa_id)
   if (!empresaId) return
-  const [categorias, catalogo, archivos] = await Promise.all([
+  const [categorias, catalogo, archivos, entregas] = await Promise.all([
     db('gestor_documental_categorias').where('activo', true).orderBy('orden'),
     db('gestor_documental_catalogo as c')
       .join('gestor_documental_categorias as k', 'k.id', 'c.categoria_id')
@@ -340,11 +346,21 @@ export async function listCatalog(req, res) {
       .where('empresa_id', empresaId)
       .select('id', 'catalogo_id', 'nombre', 'created_at')
       .orderBy('id', 'desc'),
+    db('gestor_documental_entregas')
+      .where('empresa_id', empresaId)
+      .select('id', 'solicitud_id', 'catalogo_id', 'nombre', 'created_at')
+      .orderBy('id', 'desc'),
   ])
   const ultimoArchivo = new Map()
   for (const archivo of archivos) {
     if (!ultimoArchivo.has(Number(archivo.catalogo_id))) {
       ultimoArchivo.set(Number(archivo.catalogo_id), archivo)
+    }
+  }
+  const ultimaEntrega = new Map()
+  for (const entrega of entregas) {
+    if (!ultimaEntrega.has(Number(entrega.catalogo_id))) {
+      ultimaEntrega.set(Number(entrega.catalogo_id), entrega)
     }
   }
   res.json({
@@ -354,16 +370,26 @@ export async function listCatalog(req, res) {
       const archivo = ultimoArchivo.get(Number(documento.id))
       const draftVisible = esStaff(req.user) || !!documento.borrador_publicado
       return {
-        ...documento,
-        tiene_borrador: !!documento.tiene_borrador && draftVisible,
-        borrador_nombre: draftVisible ? documento.borrador_nombre : null,
-        borrador_publicado: !!documento.borrador_publicado,
-        archivo_id: archivo?.id ?? null,
-        archivo_nombre: archivo?.nombre ?? null,
-        archivo_fecha: archivo?.created_at ?? null,
-        cargado: !!archivo,
-      }
-    }),
+      ...documento,
+      tiene_borrador: !!documento.tiene_borrador && draftVisible,
+      borrador_nombre: draftVisible ? documento.borrador_nombre : null,
+      borrador_publicado: !!documento.borrador_publicado,
+      archivo_id: isEntregaMasReciente(archivo, ultimaEntrega.get(Number(documento.id))) ? null : archivo?.id ?? null,
+      entrega_id: isEntregaMasReciente(archivo, ultimaEntrega.get(Number(documento.id)))
+        ? ultimaEntrega.get(Number(documento.id))?.id ?? null
+        : null,
+      entrega_solicitud_id: isEntregaMasReciente(archivo, ultimaEntrega.get(Number(documento.id)))
+        ? ultimaEntrega.get(Number(documento.id))?.solicitud_id ?? null
+        : null,
+      archivo_nombre: isEntregaMasReciente(archivo, ultimaEntrega.get(Number(documento.id)))
+        ? ultimaEntrega.get(Number(documento.id))?.nombre ?? null
+        : archivo?.nombre ?? null,
+      archivo_fecha: isEntregaMasReciente(archivo, ultimaEntrega.get(Number(documento.id)))
+        ? ultimaEntrega.get(Number(documento.id))?.created_at ?? null
+        : archivo?.created_at ?? null,
+      cargado: !!archivo || !!ultimaEntrega.get(Number(documento.id)),
+    }
+  }),
   })
 }
 
@@ -585,6 +611,7 @@ export async function createCatalogRequest(req, res) {
   let categoriaId
   let catalogoId = null
   let descripcion
+  let documentosSolicitados = []
   if (tipo === 'gestor_paquete') {
     const categoria = await db('gestor_documental_categorias')
       .where({ id: req.body.categoria_id, activo: true }).first()
@@ -606,11 +633,17 @@ export async function createCatalogRequest(req, res) {
         }
       }
     }
-    const total = await db('gestor_documental_catalogo')
-      .whereIn('categoria_id', [...ids])
-      .where('activo', true)
-      .count({ total: '*' }).first()
-    descripcion = `Gestor Documental - Elaboración solicitada: paquete ${categoria.nombre} (${total.total} documentos)`
+    documentosSolicitados = await db('gestor_documental_catalogo as d')
+      .join('gestor_documental_categorias as c', 'c.id', 'd.categoria_id')
+      .whereIn('d.categoria_id', [...ids])
+      .where('d.activo', true)
+      .where('c.activo', true)
+      .select('d.id', 'd.categoria_id', 'd.nombre', 'c.orden as categoria_orden', 'd.orden')
+      .orderBy([{ column: 'c.orden' }, { column: 'd.orden' }])
+    if (!documentosSolicitados.length) {
+      return res.status(409).json({ error: 'La categoría no tiene documentos activos para solicitar' })
+    }
+    descripcion = `Gestor Documental - Elaboración solicitada: paquete ${categoria.nombre} (${documentosSolicitados.length} documentos)`
   } else {
     const documento = await db('gestor_documental_catalogo as d')
       .join('gestor_documental_categorias as c', 'c.id', 'd.categoria_id')
@@ -622,6 +655,7 @@ export async function createCatalogRequest(req, res) {
     if (!documento) return res.status(404).json({ error: 'Documento no encontrado' })
     categoriaId = documento.categoria_id
     catalogoId = documento.id
+    documentosSolicitados = [documento]
     descripcion = `Gestor Documental - Elaboración solicitada: ${documento.nombre} (${documento.categoria_nombre})`
   }
 
@@ -636,6 +670,13 @@ export async function createCatalogRequest(req, res) {
       descripcion,
       status: 'pendiente',
     })
+    await trx('gestor_documental_solicitud_items').insert(documentosSolicitados.map((documento, index) => ({
+      solicitud_id: id,
+      catalogo_id: documento.id,
+      categoria_id: documento.categoria_id,
+      nombre: documento.nombre,
+      orden: index + 1,
+    })))
     const admins = await trx('users').select('id').where('role', 'admin').where('is_active', true)
     notificationRows = await createNotifications(trx, admins.map(admin => admin.id), {
       titulo: 'Solicitud de elaboración documental',
@@ -648,4 +689,149 @@ export async function createCatalogRequest(req, res) {
   })
   publishNotifications(notificationRows)
   res.status(201).json({ solicitud })
+}
+
+async function solicitudGestorVisible(req, res) {
+  const solicitud = await db('solicitudes').where('id', req.params.id).first()
+  if (!solicitud) {
+    res.status(404).json({ error: 'Solicitud no encontrada' })
+    return null
+  }
+  if (!['gestor_paquete', 'gestor_documento'].includes(solicitud.tipo_solicitud)) {
+    res.status(400).json({ error: 'La solicitud no pertenece al Gestor Documental' })
+    return null
+  }
+  if (!canAccessEmpresa(req.user, solicitud.empresa_id)) {
+    res.status(403).json({ error: 'Sin acceso a esta solicitud' })
+    return null
+  }
+  return solicitud
+}
+
+export async function listRequestedDocuments(req, res) {
+  const solicitud = await solicitudGestorVisible(req, res)
+  if (!solicitud) return
+  const [categoria, items, entregas] = await Promise.all([
+    solicitud.gestor_categoria_id
+      ? db('gestor_documental_categorias').where('id', solicitud.gestor_categoria_id).first('nombre')
+      : null,
+    db('gestor_documental_solicitud_items')
+      .where('solicitud_id', solicitud.id)
+      .orderBy('orden')
+      .select('catalogo_id', 'categoria_id', 'nombre', 'orden'),
+    db('gestor_documental_entregas')
+      .where('solicitud_id', solicitud.id)
+      .orderBy('id', 'desc')
+      .select('id', 'solicitud_item_id', 'catalogo_id', 'nombre', 'created_at'),
+  ])
+  const ultimaEntrega = new Map()
+  for (const entrega of entregas) {
+    if (!ultimaEntrega.has(Number(entrega.catalogo_id))) {
+      ultimaEntrega.set(Number(entrega.catalogo_id), entrega)
+    }
+  }
+  res.json({
+    solicitud_id: solicitud.id,
+    tipo_solicitud: solicitud.tipo_solicitud,
+    categoria_nombre: categoria?.nombre ?? null,
+    total: items.length,
+    entregados: items.filter(item => ultimaEntrega.has(Number(item.catalogo_id))).length,
+    data: items.map(item => {
+      const entrega = ultimaEntrega.get(Number(item.catalogo_id))
+      return {
+        ...item,
+        entregado: !!entrega,
+        entrega_id: entrega?.id ?? null,
+        entrega_nombre: entrega?.nombre ?? null,
+        entrega_fecha: entrega?.created_at ?? null,
+      }
+    }),
+  })
+}
+
+export async function uploadRequestedDocument(req, res) {
+  if (!req.file) return res.status(400).json({ error: 'Archivo requerido' })
+  const solicitud = await solicitudGestorVisible(req, res)
+  if (!solicitud) {
+    unlinkSync(req.file.path)
+    return
+  }
+  if (!esStaff(req.user)) {
+    unlinkSync(req.file.path)
+    return res.status(403).json({ error: 'Solo el equipo de Soy Asesorías puede entregar estos documentos' })
+  }
+  const catalogoId = Number(req.params.catalogoId)
+  const item = await db('gestor_documental_solicitud_items')
+    .where({ solicitud_id: solicitud.id, catalogo_id: catalogoId })
+    .first()
+  if (!item) {
+    unlinkSync(req.file.path)
+    return res.status(404).json({ error: 'El documento no forma parte de esta solicitud' })
+  }
+
+  let entregaId
+  let notificationRows = []
+  try {
+    await db.transaction(async trx => {
+      const [id] = await trx('gestor_documental_entregas').insert({
+        solicitud_id: solicitud.id,
+        solicitud_item_id: item.id,
+        catalogo_id: item.catalogo_id,
+        empresa_id: solicitud.empresa_id,
+        uploaded_by: req.user.id,
+        nombre: req.file.originalname.slice(0, 255),
+        path: req.file.filename,
+        mime: req.file.mimetype,
+        size: req.file.size,
+      })
+      entregaId = id
+
+      let destinatarios = solicitud.solicitado_por ? [solicitud.solicitado_por] : []
+      if (!destinatarios.length && solicitud.empresa_id) {
+        const principal = await trx('empresas').where('id', solicitud.empresa_id).first('user_id')
+        if (principal?.user_id) destinatarios = [principal.user_id]
+      }
+      notificationRows = await createNotifications(trx, destinatarios, {
+        titulo: 'Documento entregado',
+        mensaje: `Se adjuntó "${item.nombre}" a tu solicitud #${solicitud.id}.`,
+        tipo: 'solicitud',
+        solicitudId: solicitud.id,
+        url: '/admin/solicitudes',
+      })
+    })
+  } catch (error) {
+    if (existsSync(req.file.path)) unlinkSync(req.file.path)
+    throw error
+  }
+  publishNotifications(notificationRows)
+  res.status(201).json({
+    entrega: {
+      id: entregaId,
+      solicitud_id: solicitud.id,
+      catalogo_id: item.catalogo_id,
+      nombre: req.file.originalname,
+    },
+  })
+}
+
+export async function downloadRequestedDocument(req, res) {
+  const solicitud = await solicitudGestorVisible(req, res)
+  if (!solicitud) return
+  const catalogoId = Number(req.params.catalogoId)
+  const item = await db('gestor_documental_solicitud_items')
+    .where({ solicitud_id: solicitud.id, catalogo_id: catalogoId })
+    .first('id')
+  if (!item) return res.status(404).json({ error: 'Documento no solicitado en este paquete' })
+  const entrega = await db('gestor_documental_entregas')
+    .where({ solicitud_id: solicitud.id, solicitud_item_id: item.id })
+    .orderBy('id', 'desc')
+    .first()
+  if (!entrega) return res.status(404).json({ error: 'Este documento aún no ha sido entregado' })
+  const fullPath = resolve(STORAGE_DIR, entrega.path)
+  if (!fullPath.startsWith(`${STORAGE_DIR}${sep}`) || !existsSync(fullPath)) {
+    return res.status(404).json({ error: 'Archivo no disponible' })
+  }
+  res.setHeader('Content-Type', entrega.mime || 'application/octet-stream')
+  res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(entrega.nombre)}`)
+  createReadStream(fullPath).pipe(res)
 }

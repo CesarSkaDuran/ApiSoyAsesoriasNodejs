@@ -26,6 +26,9 @@ const endpoints = [
   ['Empleados', 'post', '/api/empleados/{id}/incapacidades', 'Registrar incapacidad'],
   ['Empleados', 'put', '/api/empleados/{id}/incapacidades/{iid}', 'Actualizar incapacidad'],
   ['Empleados', 'delete', '/api/empleados/{id}/incapacidades/{iid}', 'Eliminar incapacidad'],
+  ['Solicitudes', 'get', '/api/solicitudes/{id}/gestor-documentos', 'Listar los documentos incluidos en una solicitud del Gestor Documental y su avance'],
+  ['Solicitudes', 'post', '/api/solicitudes/{id}/gestor-documentos/{catalogoId}', 'Adjuntar un documento solicitado (admin/asesor)', { multipart: 'file' }],
+  ['Solicitudes', 'get', '/api/solicitudes/{id}/gestor-documentos/{catalogoId}/download', 'Descargar un documento entregado en la solicitud', { download: true }],
   ['Nómina', 'get', '/api/nominas', 'Listar nóminas'],
   ['Nómina', 'post', '/api/nominas', 'Crear nómina'],
   ['Nómina', 'get', '/api/nominas/{id}', 'Consultar nómina'],
@@ -127,6 +130,21 @@ const endpoints = [
   ['Informes', 'get', '/api/informes/ingresos', 'Consultar informe de ingresos'],
   ['Informes', 'get', '/api/informes/egresos', 'Consultar informe de egresos'],
   ['Informes', 'get', '/api/informes/servicios', 'Consultar informe de servicios'],
+  ['Informes', 'get', '/api/informes/solicitudes/clientes', 'Listar clientes disponibles para filtrar el informe de solicitudes'],
+  ['Informes', 'get', '/api/informes/solicitudes', 'Resumen de solicitudes por estado, fecha, tipo y cliente', {
+    query: [
+      { name: 'desde', type: 'string', description: 'Fecha inicial YYYY-MM-DD.' },
+      { name: 'hasta', type: 'string', description: 'Fecha final YYYY-MM-DD.' },
+      { name: 'tipo_cliente', type: 'string', description: 'todos, empresa o independiente.' },
+      { name: 'empresa_id', type: 'integer', description: 'Filtrar una empresa.' },
+      { name: 'persona_id', type: 'integer', description: 'Filtrar un independiente.' },
+    ],
+  }],
+  ['Asistente IA', 'post', '/api/ia/chat', 'Consultar al asistente sobre el sistema o solicitar borradores de texto', { body: 'IAChatRequest' }],
+  ['Asistente IA', 'get', '/api/ia/sesiones', 'Listar las conversaciones del usuario autenticado'],
+  ['Asistente IA', 'post', '/api/ia/sesiones', 'Crear una conversación nueva', { body: 'IAChatSessionRequest' }],
+  ['Asistente IA', 'get', '/api/ia/sesiones/{id}', 'Consultar mensajes de una conversación propia'],
+  ['Asistente IA', 'delete', '/api/ia/sesiones/{id}', 'Eliminar una conversación propia y sus mensajes'],
   ['Auditoría', 'get', '/api/auditorias', 'Consultar registros de auditoría'],
   ['Maestros', 'get', '/api/maestros', 'Listar catálogos maestros'],
   ['Maestros', 'get', '/api/maestros/{catalogo}', 'Consultar registros de catálogo'],
@@ -237,6 +255,34 @@ const schemas = {
     properties: {
       nombre: { type: 'string', maxLength: 255 },
       parent_id: { type: 'integer', nullable: true, description: 'Vacío para una categoría raíz; ID de categoría principal para crear una subcategoría.' },
+    },
+  },
+  IAChatRequest: {
+    type: 'object',
+    description: 'Usar session_id + message para guardar el turno en una conversación persistida.',
+    properties: {
+      session_id: { type: 'integer' },
+      message: { type: 'string', maxLength: 4000 },
+      contexto: { type: 'string', enum: ['general', 'informes', 'informe_solicitudes', 'gestor_documental', 'nominas', 'solicitudes'] },
+      messages: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 12,
+        items: {
+          type: 'object',
+          required: ['role', 'content'],
+          properties: {
+            role: { type: 'string', enum: ['user', 'assistant'] },
+            content: { type: 'string', maxLength: 4000 },
+          },
+        },
+      },
+    },
+  },
+  IAChatSessionRequest: {
+    type: 'object',
+    properties: {
+      contexto: { type: 'string', enum: ['general', 'informes', 'informe_solicitudes', 'gestor_documental', 'nominas', 'solicitudes'] },
     },
   },
   CrearCuentaCobroRequest: {

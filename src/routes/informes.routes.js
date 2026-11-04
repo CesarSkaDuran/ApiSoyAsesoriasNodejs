@@ -1,7 +1,9 @@
 import { Router } from 'express'
 import { authMiddleware, requireRole, requireModulo } from '../middlewares/auth.js'
 import {
-  ingresos, egresos, servicios as informeServicios, resumen, dashboard, miResumen,
+  ingresos, egresos, servicios as informeServicios, solicitudes as informeSolicitudes,
+  clientesSolicitudes as informeClientesSolicitudes,
+  resumen, dashboard, miResumen,
 } from '../controllers/informes.controller.js'
 
 const router = Router()
@@ -15,5 +17,7 @@ router.get('/dashboard', dashboard)
 router.get('/ingresos', ingresos)
 router.get('/egresos', egresos)
 router.get('/servicios', informeServicios)
+router.get('/solicitudes/clientes', informeClientesSolicitudes)
+router.get('/solicitudes', informeSolicitudes)
 
 export default router

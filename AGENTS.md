@@ -82,6 +82,15 @@
   si está vacío. Los borradores del admin y los archivos de clientes tienen
   almacenamiento y endpoints distintos; la carga del cliente siempre se
   fuerza a su empresa autenticada.
+- Las solicitudes de paquete/documento guardan un snapshot en
+  `gestor_documental_solicitud_items`; cada entrega administrativa va a
+  `gestor_documental_entregas`. La interfaz de Solicitudes lista el paquete y
+  permite adjuntar/descargar cada documento individualmente.
+- El Asistente IA usa `POST /api/ia/chat` y un proveedor compatible con
+  OpenAI Chat Completions. `AI_API_KEY`, `AI_API_BASE_URL` y `AI_MODEL` se
+  configuran solo en el entorno privado del servidor; nunca en el frontend.
+  El módulo `ia` requiere permiso explícito y tiene límites de mensajes por
+  usuario.
 
 ## Despliegue y reinicio en producción (cPanel / LiteSpeed)
 

@@ -185,6 +185,28 @@ export async function runMigrations() {
     })
     console.log('  + user_modulo_permisos')
   }
+  if (!await db.schema.hasTable('ia_chat_sesiones')) {
+    await createTable('ia_chat_sesiones', t => {
+      t.increments('id')
+      t.integer('user_id').unsigned().notNullable().index()
+      t.string('titulo', 160).notNullable().defaultTo('Nueva conversación')
+      t.string('contexto', 40).notNullable().defaultTo('general')
+      t.timestamps(true, true)
+      t.index(['user_id', 'updated_at'], 'ia_chat_sesiones_user_updated_idx')
+    })
+    console.log('  + ia_chat_sesiones')
+  }
+  if (!await db.schema.hasTable('ia_chat_mensajes')) {
+    await createTable('ia_chat_mensajes', t => {
+      t.increments('id')
+      t.integer('sesion_id').unsigned().notNullable().index()
+      t.string('rol', 12).notNullable()
+      t.text('contenido').notNullable()
+      t.timestamp('created_at').notNullable().defaultTo(db.fn.now())
+      t.index(['sesion_id', 'id'], 'ia_chat_mensajes_sesion_id_idx')
+    })
+    console.log('  + ia_chat_mensajes')
+  }
 
   // ══════════════════════════════════════════════════════════════════
   // CLIENTES: EMPRESAS E INDEPENDIENTES
@@ -1096,6 +1118,36 @@ export async function runMigrations() {
     })
     console.log('  + gestor_documental_archivos')
   }
+  if (!await db.schema.hasTable('gestor_documental_solicitud_items')) {
+    await createTable('gestor_documental_solicitud_items', t => {
+      t.increments('id')
+      t.integer('solicitud_id').unsigned().notNullable().index()
+      t.integer('catalogo_id').unsigned().notNullable().index()
+      t.integer('categoria_id').unsigned().notNullable().index()
+      t.string('nombre', 255).notNullable()
+      t.integer('orden').notNullable().defaultTo(0)
+      t.timestamps(true, true)
+      t.unique(['solicitud_id', 'catalogo_id'], 'gds_items_solicitud_catalogo_unique')
+    })
+    console.log('  + gestor_documental_solicitud_items')
+  }
+  if (!await db.schema.hasTable('gestor_documental_entregas')) {
+    await createTable('gestor_documental_entregas', t => {
+      t.increments('id')
+      t.integer('solicitud_id').unsigned().notNullable().index()
+      t.integer('solicitud_item_id').unsigned().notNullable().index()
+      t.integer('catalogo_id').unsigned().notNullable().index()
+      t.integer('empresa_id').unsigned().notNullable().index()
+      t.integer('uploaded_by').unsigned().nullable()
+      t.string('nombre', 255).notNullable()
+      t.string('path', 500).notNullable()
+      t.string('mime', 100).nullable()
+      t.integer('size').unsigned().nullable()
+      t.timestamps(true, true)
+      t.index(['solicitud_id', 'catalogo_id', 'id'], 'gde_solicitud_catalogo_id_idx')
+    })
+    console.log('  + gestor_documental_entregas')
+  }
 
   // Seed del Excel recibido. Solo se ejecuta cuando el catálogo está vacío
   // para conservar los cambios de nombres y estados hechos por el admin.
@@ -1156,7 +1208,6 @@ export async function runMigrations() {
       console.log(`  + solicitudes.${column}`)
     }
   }
-
   const [solicitudStatusColumns] = await db.raw("SHOW COLUMNS FROM `solicitudes` LIKE 'status'")
   if (solicitudStatusColumns?.[0] && !solicitudStatusColumns[0].Type.includes("'aprobada'")) {
     await db.raw("ALTER TABLE `solicitudes` MODIFY `status` ENUM('pendiente','aprobada','en_proceso','completada','rechazada','cancelada') NOT NULL DEFAULT 'pendiente'")
@@ -2371,14 +2422,62 @@ export async function runMigrations() {
     }
   }
   if (await db.schema.hasTable('solicitudes')) {
-    if (!await db.schema.hasColumn('solicitudes', 'empleado_id')) {
-      await db.schema.alterTable('solicitudes', t => {
-        t.integer('empleado_id').unsigned().nullable().index()
-        t.string('tipo_solicitud', 40).notNullable().defaultTo('general')
-        t.date('fecha_inicio').nullable()
-        t.date('fecha_fin').nullable()
-      })
-      console.log('  + solicitudes employee self-service fields')
+    for (const [column, addColumn] of [
+      ['empleado_id', t => t.integer('empleado_id').unsigned().nullable().index()],
+      ['tipo_solicitud', t => t.string('tipo_solicitud', 40).notNullable().defaultTo('general')],
+      ['fecha_inicio', t => t.date('fecha_inicio').nullable()],
+      ['fecha_fin', t => t.date('fecha_fin').nullable()],
+    ]) {
+      if (!await db.schema.hasColumn('solicitudes', column)) {
+        await db.schema.alterTable('solicitudes', addColumn)
+        console.log(`  + solicitudes.${column}`)
+      }
+    }
+  }
+  if (await db.schema.hasTable('solicitudes') && await db.schema.hasColumn('solicitudes', 'tipo_solicitud')) {
+    const solicitudesGestor = await db('solicitudes')
+      .whereIn('tipo_solicitud', ['gestor_paquete', 'gestor_documento'])
+      .whereNotNull('empresa_id')
+      .select('id', 'tipo_solicitud', 'gestor_categoria_id', 'gestor_catalogo_id')
+    const categoriasGestor = await db('gestor_documental_categorias')
+      .select('id', 'parent_id')
+    const childrenByParent = new Map()
+    for (const categoria of categoriasGestor) {
+      const parentId = Number(categoria.parent_id) || 0
+      childrenByParent.set(parentId, [...(childrenByParent.get(parentId) || []), Number(categoria.id)])
+    }
+    for (const solicitud of solicitudesGestor) {
+      if (await db('gestor_documental_solicitud_items')
+        .where('solicitud_id', solicitud.id).first('id')) continue
+      if (solicitud.tipo_solicitud === 'gestor_documento' && solicitud.gestor_catalogo_id) {
+        const documento = await db('gestor_documental_catalogo')
+          .where('id', solicitud.gestor_catalogo_id).first('id', 'categoria_id', 'nombre')
+        if (documento) {
+          await db('gestor_documental_solicitud_items').insert({
+            solicitud_id: solicitud.id,
+            catalogo_id: documento.id,
+            categoria_id: documento.categoria_id,
+            nombre: documento.nombre,
+            orden: 1,
+          })
+        }
+      } else if (solicitud.gestor_categoria_id) {
+        const root = Number(solicitud.gestor_categoria_id)
+        const ids = [root, ...(childrenByParent.get(root) || [])]
+        const documentos = await db('gestor_documental_catalogo')
+          .whereIn('categoria_id', ids)
+          .orderBy([{ column: 'categoria_id' }, { column: 'orden' }])
+          .select('id', 'categoria_id', 'nombre')
+        if (documentos.length) {
+          await db('gestor_documental_solicitud_items').insert(documentos.map((documento, index) => ({
+            solicitud_id: solicitud.id,
+            catalogo_id: documento.id,
+            categoria_id: documento.categoria_id,
+            nombre: documento.nombre,
+            orden: index + 1,
+          })))
+        }
+      }
     }
   }
   if (!await db.schema.hasTable('plantillas_rrhh')) {
