@@ -67,6 +67,7 @@ const endpoints = [
   }],
   ['Gestor Documental', 'get', '/api/gestor-documental/admin/catalogo', 'Administrar el catálogo de categorías y documentos'],
   ['Gestor Documental', 'post', '/api/gestor-documental/admin/categorias', 'Crear una categoría raíz o una subcategoría', { body: 'GestorDocumentalCategoriaRequest' }],
+  ['Gestor Documental', 'post', '/api/gestor-documental/admin/catalogo', 'Agregar un documento al catálogo'],
   ['Gestor Documental', 'put', '/api/gestor-documental/admin/catalogo/{id}', 'Actualizar nombre, disponibilidad o publicación'],
   ['Gestor Documental', 'post', '/api/gestor-documental/admin/catalogo/{id}/borrador', 'Cargar o reemplazar el borrador de un documento', { multipart: 'file' }],
   ['Gestor Documental', 'get', '/api/gestor-documental/catalogo/{id}/borrador', 'Leer o descargar el borrador publicado', { download: true }],

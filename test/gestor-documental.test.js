@@ -218,8 +218,14 @@ test('importa categorías del Excel y habilita un usuario aislado de Gestor Docu
 
   const catalog = await api.get('/gestor-documental/admin/catalogo', { token: admin.token })
   assert.equal(catalog.status, 200)
-  assert.equal(catalog.data.categorias.length, 24)
-  assert.equal(catalog.data.documentos.length, 250)
+  assert.equal(catalog.data.categorias.length, 23)
+  assert.equal(catalog.data.documentos.length, 242)
+  assert.equal(catalog.data.categorias.some(c => c.codigo === '0'), false)
+
+  const adicionalesAdmin = await api.get('/gestor-documental/admin/catalogo?seccion=adicionales', { token: admin.token })
+  assert.equal(adicionalesAdmin.status, 200)
+  assert.equal(adicionalesAdmin.data.categorias.length, 1)
+  assert.equal(adicionalesAdmin.data.documentos.length, 3)
 
   const email = `gestor.empresa.${Date.now()}@prueba.local`
   const created = await api.post('/auth/users', {
@@ -249,8 +255,13 @@ test('importa categorías del Excel y habilita un usuario aislado de Gestor Docu
   const moduleData = await api.get(`/gestor-documental/catalogo?empresa_id=999999`, { token: login.data.token })
   assert.equal(moduleData.status, 200)
   assert.equal(moduleData.data.empresa_id, empresa.id, 'el tenant se fuerza a la empresa vinculada')
-  assert.equal(moduleData.data.categorias.length, 24)
-  assert.equal(moduleData.data.documentos.length, 250)
+  assert.equal(moduleData.data.categorias.length, 23)
+  assert.equal(moduleData.data.documentos.length, 242)
+
+  const adicionalesCliente = await api.get('/gestor-documental/catalogo?seccion=adicionales', { token: login.data.token })
+  assert.equal(adicionalesCliente.status, 200)
+  assert.equal(adicionalesCliente.data.categorias.length, 1)
+  assert.equal(adicionalesCliente.data.documentos.length, 3)
   const deniedPayroll = await api.get(`/nominas?empresa_id=${empresa.id}`, { token: login.data.token })
   assert.equal(deniedPayroll.status, 403)
   assert.equal((await api.get('/solicitudes', { token: login.data.token })).status, 200)

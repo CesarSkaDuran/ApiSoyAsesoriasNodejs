@@ -61,6 +61,9 @@ function canAccessDoc(user, empresaId, personaId) {
 export async function listTipos(req, res) {
   const q = db('documento_tipos').orderBy([{ column: 'orden' }, { column: 'nombre' }])
   if (!esStaff(req.user)) q.where('activo', true)
+  if (req.query.categoria && ['empresa', 'legales'].includes(String(req.query.categoria))) {
+    q.where('categoria', String(req.query.categoria))
+  }
   res.json({ data: await q })
 }
 
@@ -126,13 +129,17 @@ export async function uploadDoc(req, res) {
     return res.status(400).json({ error: `Indique el owner: ${OWNERS.join(', ')}` })
   }
 
+  let tipoRow = null
   if (tipo_id) {
-    const tipo = await db('documento_tipos').where('id', tipo_id).where('activo', true).first()
-    if (!tipo) {
+    tipoRow = await db('documento_tipos').where('id', tipo_id).where('activo', true).first()
+    if (!tipoRow) {
       unlinkSync(req.file.path)
       return res.status(400).json({ error: 'Tipo de documento no válido' })
     }
   }
+  const categoriaEmpresa = ['empresa', 'legales'].includes(String(req.body.categoria_empresa || ''))
+    ? String(req.body.categoria_empresa)
+    : (tipoRow?.categoria || null)
 
   // Verificar que el usuario pueda subir a ese owner
   const { empresaId, personaId } = await duenoDeDoc(ownerCol, req.body[ownerCol])
@@ -147,6 +154,7 @@ export async function uploadDoc(req, res) {
       [ownerCol]: Number(req.body[ownerCol]),
       servicio_id: servicio_id || null,
       tipo_id: tipo_id || null,
+      categoria_empresa: categoriaEmpresa,
       version: version || null,
       fecha_emision: fecha_emision || null,
       estatus: 'recibido',
@@ -279,6 +287,9 @@ export async function list(req, res) {
     .leftJoin('empresas as e4', 'pl.empresa_id', 'e4.id')
   if (ownerCol) base.where(`documentos.${ownerCol}`, req.query[ownerCol])
   if (req.query.tipo_id) base.where('documentos.tipo_id', req.query.tipo_id)
+  if (req.query.categoria_empresa && ['empresa', 'legales'].includes(String(req.query.categoria_empresa))) {
+    base.whereRaw("COALESCE(documentos.categoria_empresa, documento_tipos.categoria, 'empresa') = ?", [String(req.query.categoria_empresa)])
+  }
   if (req.query.search) {
     const term = `%${String(req.query.search).trim()}%`
     base.where(q => q
@@ -293,11 +304,15 @@ export async function list(req, res) {
 
   const [{ total }] = await base.clone().countDistinct({ total: 'documentos.id' })
   const data = await base.clone()
-    .select('documentos.*', 'documento_tipos.nombre as tipo_nombre',
+    .select(
+      'documentos.*',
+      'documento_tipos.nombre as tipo_nombre',
+      db.raw("COALESCE(documentos.categoria_empresa, documento_tipos.categoria, 'empresa') as categoria_empresa"),
       db.raw(`COALESCE(
         e.razon_social, e2.razon_social, e3.razon_social, e4.razon_social,
         CONCAT_WS(' ', p.primer_nombre, p.primer_apellido)
-      ) as cliente_nombre`))
+      ) as cliente_nombre`)
+    )
     .orderBy('documentos.id', 'desc')
     .limit(perPage)
     .offset((page - 1) * perPage)

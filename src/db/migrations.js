@@ -1076,11 +1076,18 @@ export async function runMigrations() {
       t.integer('parent_id').unsigned().nullable().index()
         .references('id').inTable('gestor_documental_categorias').onDelete('SET NULL')
       t.string('nombre', 255).notNullable()
+      t.string('seccion', 30).notNullable().defaultTo('general').index()
       t.integer('orden').notNullable().defaultTo(0)
       t.boolean('activo').notNullable().defaultTo(true)
       t.timestamps(true, true)
     })
     console.log('  + gestor_documental_categorias')
+  }
+  if (!await db.schema.hasColumn('gestor_documental_categorias', 'seccion')) {
+    await db.schema.alterTable('gestor_documental_categorias', t => {
+      t.string('seccion', 30).notNullable().defaultTo('general').index()
+    })
+    console.log('  + gestor_documental_categorias.seccion')
   }
   if (!await db.schema.hasTable('gestor_documental_catalogo')) {
     await createTable('gestor_documental_catalogo', t => {
@@ -2545,6 +2552,123 @@ export async function runMigrations() {
     if (!await db.schema.hasColumn('personas', col)) {
       await db.schema.alterTable('personas', t => { t.decimal(col, 15, 2).nullable() })
       console.log(`  + personas.${col}`)
+    }
+  }
+
+  // Retiro de la categoría 0 (DOCUMENTOS LEGALES) del Gestor Documental
+  // porque son documentos únicos de la empresa, y creación de la sección
+  // "Documentos adicionales" (Memorando, Contrato a tiempo parcial,
+  // Contrato a término indefinido).
+  {
+    const logCat0 = 'gestor_documental_eliminar_cat_0'
+    if (!await db('migraciones_log').where('nombre', logCat0).first()) {
+      const cat0 = await db('gestor_documental_categorias').where('codigo', '0').first('id')
+      if (cat0) {
+        const docs0 = await db('gestor_documental_catalogo').where('categoria_id', cat0.id).select('id')
+        const docIds = docs0.map(d => d.id)
+        if (docIds.length) {
+          await db('gestor_documental_entregas').whereIn('catalogo_id', docIds).delete()
+          await db('gestor_documental_solicitud_items').whereIn('catalogo_id', docIds).delete()
+          await db('gestor_documental_archivos').whereIn('catalogo_id', docIds).delete()
+          await db('gestor_documental_catalogo').whereIn('id', docIds).delete()
+        }
+        await db('gestor_documental_categorias').where('id', cat0.id).delete()
+      }
+      await db('migraciones_log').insert({ nombre: logCat0 })
+      console.log('  ~ gestor_documental: categoría 0 retirada (documentos únicos de empresa)')
+    }
+
+    let catAdicionales = await db('gestor_documental_categorias')
+      .where('codigo', 'adicionales-1')
+      .first('id')
+    if (!catAdicionales) {
+      const [id] = await db('gestor_documental_categorias').insert({
+        codigo: 'adicionales-1',
+        numero: '01',
+        parent_id: null,
+        nombre: 'DOCUMENTOS ADICIONALES',
+        seccion: 'adicionales',
+        orden: 1,
+        activo: true,
+      })
+      catAdicionales = { id }
+      console.log('  + gestor_documental_categorias: DOCUMENTOS ADICIONALES')
+    }
+    const docsAdicionales = [
+      ['adicional-memorando', 'Memorando', 1],
+      ['adicional-contrato-tiempo-parcial', 'Contrato a tiempo parcial', 2],
+      ['adicional-contrato-termino-indefinido', 'Contrato a término indefinido', 3],
+    ]
+    for (const [sourceCode, nombre, orden] of docsAdicionales) {
+      if (!await db('gestor_documental_catalogo').where('source_code', sourceCode).first('id')) {
+        await db('gestor_documental_catalogo').insert({
+          source_code: sourceCode,
+          categoria_id: catAdicionales.id,
+          nombre,
+          orden,
+          activo: true,
+        })
+      }
+    }
+  }
+
+  // Clasificación de documentos de empresa en "empresa" (Cámara de Comercio,
+  // RUT, Cédula representante legal, etc.) y "legales" (RIT, Políticas, etc.)
+  if (await db.schema.hasTable('documento_tipos') && !await db.schema.hasColumn('documento_tipos', 'categoria')) {
+    await db.schema.alterTable('documento_tipos', t => {
+      t.string('categoria', 30).notNullable().defaultTo('empresa').index()
+    })
+    console.log('  + documento_tipos.categoria')
+  }
+  if (await db.schema.hasTable('documentos') && !await db.schema.hasColumn('documentos', 'categoria_empresa')) {
+    await db.schema.alterTable('documentos', t => {
+      t.string('categoria_empresa', 30).nullable().index()
+    })
+    console.log('  + documentos.categoria_empresa')
+  }
+  {
+    const logTipos = 'documento_tipos_categorias_empresa_legales'
+    if (!await db('migraciones_log').where('nombre', logTipos).first()) {
+      const tiposEmpresa = [
+        ['Cámara de Comercio vigente', 'Certificado de existencia y representación legal (no mayor a 30 días).', 1],
+        ['RUT actualizado', 'Registro Único Tributario con actividad económica (código CIIU).', 2],
+        ['Cédula del representante legal', 'Documento de identidad del representante legal.', 3],
+        ['Registro mercantil vigente', 'Matrícula o registro mercantil vigente.', 4],
+        ['Certificación bancaria', 'Certificación de la cuenta bancaria de la empresa.', 5],
+        ['Pólizas de seguros empresariales', 'Pólizas de seguros empresariales vigentes.', 6],
+        ['Organigrama de la empresa', 'Estructura organizacional y jerarquías de la empresa.', 7],
+        ['Sucursales', 'Relación o registro de sucursales de la empresa.', 8],
+      ]
+      const tiposLegales = [
+        ['Reglamento interno de trabajo', 'Reglamento Interno de Trabajo (RIT) adoptado y vigente.', 10],
+        ['Políticas corporativas', 'Políticas de prevención, acoso laboral, tratamiento de datos y demás políticas internas.', 11],
+        ['Manual de funciones', 'Manuales de funciones y perfiles de cargo.', 12],
+        ['Contratos laborales vigentes', 'Contratos de trabajo vigentes.', 13],
+        ['Horarios laborales', 'Jornada y cuadros de turnos laborales.', 14],
+        ['Matriz de riesgos laborales', 'Matriz de identificación de peligros y valoración de riesgos (SG-SST).', 15],
+        ['Quejas o reclamaciones', ' Soportes de quejas, reclamos o procesos disciplinarios.', 16],
+      ]
+      for (const [nombre, descripcion, orden] of tiposEmpresa) {
+        const existing = await db('documento_tipos').where('nombre', nombre).first('id')
+        if (existing) {
+          await db('documento_tipos').where('id', existing.id).update({ categoria: 'empresa' })
+        } else {
+          await db('documento_tipos').insert({ nombre, descripcion, orden, categoria: 'empresa', activo: true })
+        }
+      }
+      for (const [nombre, descripcion, orden] of tiposLegales) {
+        const existing = await db('documento_tipos').where('nombre', nombre).first('id')
+        if (existing) {
+          await db('documento_tipos').where('id', existing.id).update({ categoria: 'legales' })
+        } else {
+          await db('documento_tipos').insert({ nombre, descripcion: descripcion.trim(), orden, categoria: 'legales', activo: true })
+        }
+      }
+      await db('documento_tipos')
+        .whereIn('nombre', ['Reglamento interno', 'Contratos'])
+        .update({ categoria: 'legales' })
+      await db('migraciones_log').insert({ nombre: logTipos })
+      console.log('  ~ documento_tipos clasificados en empresa / legales')
     }
   }
 

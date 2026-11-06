@@ -327,15 +327,21 @@ function isEntregaMasReciente(archivo, entrega) {
   return new Date(entrega.created_at).getTime() >= new Date(archivo.created_at).getTime()
 }
 
+function seccionCatalogo(raw) {
+  return String(raw || '').trim() === 'adicionales' ? 'adicionales' : 'general'
+}
+
 export async function listCatalog(req, res) {
   const empresaId = await validarEmpresa(req, res, req.query.empresa_id)
   if (!empresaId) return
+  const seccion = seccionCatalogo(req.query.seccion)
   const [categorias, catalogo, archivos, entregas] = await Promise.all([
-    db('gestor_documental_categorias').where('activo', true).orderBy('orden'),
+    db('gestor_documental_categorias').where({ activo: true, seccion }).orderBy('orden'),
     db('gestor_documental_catalogo as c')
       .join('gestor_documental_categorias as k', 'k.id', 'c.categoria_id')
       .where('c.activo', true)
       .where('k.activo', true)
+      .where('k.seccion', seccion)
       .select(
         'c.id', 'c.categoria_id', 'c.nombre', 'c.orden',
         'c.borrador_nombre', 'c.borrador_publicado',
@@ -365,6 +371,7 @@ export async function listCatalog(req, res) {
   }
   res.json({
     empresa_id: empresaId,
+    seccion,
     categorias,
     documentos: catalogo.map(documento => {
       const archivo = ultimoArchivo.get(Number(documento.id))
@@ -394,17 +401,21 @@ export async function listCatalog(req, res) {
 }
 
 export async function listAdminCatalog(req, res) {
+  const seccion = seccionCatalogo(req.query.seccion)
   const [categorias, documentos] = await Promise.all([
-    db('gestor_documental_categorias').orderBy('orden'),
-    db('gestor_documental_catalogo')
+    db('gestor_documental_categorias').where('seccion', seccion).orderBy('orden'),
+    db('gestor_documental_catalogo as c')
+      .join('gestor_documental_categorias as k', 'k.id', 'c.categoria_id')
+      .where('k.seccion', seccion)
       .select(
-        'id', 'source_code', 'categoria_id', 'nombre', 'orden', 'activo',
-        'borrador_nombre', 'borrador_mime', 'borrador_size', 'borrador_publicado',
-        db.raw('CASE WHEN borrador_path IS NULL THEN 0 ELSE 1 END as tiene_borrador')
+        'c.id', 'c.source_code', 'c.categoria_id', 'c.nombre', 'c.orden', 'c.activo',
+        'c.borrador_nombre', 'c.borrador_mime', 'c.borrador_size', 'c.borrador_publicado',
+        db.raw('CASE WHEN c.borrador_path IS NULL THEN 0 ELSE 1 END as tiene_borrador')
       )
-      .orderBy([{ column: 'categoria_id' }, { column: 'orden' }]),
+      .orderBy([{ column: 'c.categoria_id' }, { column: 'c.orden' }]),
   ])
   res.json({
+    seccion,
     categorias,
     documentos: documentos.map(d => ({
       ...d,
@@ -421,17 +432,19 @@ export async function createCatalogCategory(req, res) {
     return res.status(400).json({ error: 'El nombre debe tener entre 1 y 255 caracteres' })
   }
   const parentId = req.body.parent_id ? Number(req.body.parent_id) : null
+  let seccion = seccionCatalogo(req.body.seccion)
   if (parentId) {
     const parent = await db('gestor_documental_categorias')
       .where({ id: parentId, activo: true })
-      .first('id', 'parent_id')
+      .first('id', 'parent_id', 'seccion')
     if (!parent) return res.status(404).json({ error: 'Categoría principal no encontrada' })
     if (parent.parent_id !== null) {
       return res.status(400).json({ error: 'Las subcategorías deben depender de una categoría principal' })
     }
+    seccion = parent.seccion || 'general'
   }
   const duplicateQuery = db('gestor_documental_categorias')
-    .where('activo', true)
+    .where({ activo: true, seccion })
     .whereRaw('LOWER(nombre) = LOWER(?)', [nombre])
   if (parentId) duplicateQuery.where('parent_id', parentId)
   else duplicateQuery.whereNull('parent_id')
@@ -439,7 +452,7 @@ export async function createCatalogCategory(req, res) {
     return res.status(409).json({ error: 'Ya existe una categoría con ese nombre en esta ubicación' })
   }
 
-  const orderQuery = db('gestor_documental_categorias').max({ max: 'orden' })
+  const orderQuery = db('gestor_documental_categorias').where('seccion', seccion).max({ max: 'orden' })
   if (parentId) orderQuery.where('parent_id', parentId)
   else orderQuery.whereNull('parent_id')
   const { max } = await orderQuery.first()
@@ -448,11 +461,63 @@ export async function createCatalogCategory(req, res) {
     numero: null,
     parent_id: parentId,
     nombre,
+    seccion,
     orden: Number(max || 0) + 1,
     activo: true,
   })
   res.status(201).json({
     categoria: await db('gestor_documental_categorias').where('id', id).first(),
+  })
+}
+
+export async function createCatalogDocument(req, res) {
+  const nombre = String(req.body.nombre || '').trim()
+  if (!nombre || nombre.length > 255) {
+    return res.status(400).json({ error: 'El nombre del documento debe tener entre 1 y 255 caracteres' })
+  }
+  const categoriaId = Number(req.body.categoria_id)
+  if (!Number.isInteger(categoriaId) || categoriaId < 1) {
+    return res.status(400).json({ error: 'Indique una categoría válida' })
+  }
+  const categoria = await db('gestor_documental_categorias')
+    .where({ id: categoriaId, activo: true })
+    .first('id')
+  if (!categoria) {
+    return res.status(404).json({ error: 'Categoría no encontrada' })
+  }
+  const duplicate = await db('gestor_documental_catalogo')
+    .where({ categoria_id: categoriaId, activo: true })
+    .whereRaw('LOWER(nombre) = LOWER(?)', [nombre])
+    .first('id')
+  if (duplicate) {
+    return res.status(409).json({ error: 'Ya existe un documento con ese nombre en esta categoría' })
+  }
+  const { max } = await db('gestor_documental_catalogo')
+    .where('categoria_id', categoriaId)
+    .max({ max: 'orden' })
+    .first()
+  const [id] = await db('gestor_documental_catalogo').insert({
+    source_code: `manual-${randomUUID()}`.slice(0, 40),
+    categoria_id: categoriaId,
+    nombre,
+    orden: Number(max || 0) + 1,
+    activo: true,
+  })
+  const documento = await db('gestor_documental_catalogo')
+    .where('id', id)
+    .select(
+      'id', 'source_code', 'categoria_id', 'nombre', 'orden', 'activo',
+      'borrador_nombre', 'borrador_mime', 'borrador_size', 'borrador_publicado',
+      db.raw('CASE WHEN borrador_path IS NULL THEN 0 ELSE 1 END as tiene_borrador')
+    )
+    .first()
+  res.status(201).json({
+    documento: {
+      ...documento,
+      activo: !!documento.activo,
+      borrador_publicado: !!documento.borrador_publicado,
+      tiene_borrador: !!documento.tiene_borrador,
+    },
   })
 }
 

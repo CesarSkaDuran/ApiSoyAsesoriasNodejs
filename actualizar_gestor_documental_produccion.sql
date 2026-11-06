@@ -67,14 +67,22 @@ CREATE TABLE IF NOT EXISTS `gestor_documental_categorias` (
   `numero` VARCHAR(20) NULL,
   `parent_id` INT UNSIGNED NULL,
   `nombre` VARCHAR(255) NOT NULL,
+  `seccion` VARCHAR(30) NOT NULL DEFAULT 'general',
   `orden` INT NOT NULL DEFAULT 0,
   `activo` TINYINT(1) NOT NULL DEFAULT 1,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `gestor_documental_categorias_codigo_unique` (`codigo`),
-  KEY `gestor_documental_categorias_parent_id_index` (`parent_id`)
+  KEY `gestor_documental_categorias_parent_id_index` (`parent_id`),
+  KEY `gestor_documental_categorias_seccion_index` (`seccion`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=@schema_name AND TABLE_NAME='gestor_documental_categorias' AND COLUMN_NAME='seccion')=0, 'ALTER TABLE `gestor_documental_categorias` ADD COLUMN `seccion` VARCHAR(30) NOT NULL DEFAULT ''general''', 'SELECT 1');
+PREPARE gestor_ddl FROM @sql; EXECUTE gestor_ddl; DEALLOCATE PREPARE gestor_ddl;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=@schema_name AND TABLE_NAME='documento_tipos' AND COLUMN_NAME='categoria')=0, 'ALTER TABLE `documento_tipos` ADD COLUMN `categoria` VARCHAR(30) NOT NULL DEFAULT ''empresa''', 'SELECT 1');
+PREPARE gestor_ddl FROM @sql; EXECUTE gestor_ddl; DEALLOCATE PREPARE gestor_ddl;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=@schema_name AND TABLE_NAME='documentos' AND COLUMN_NAME='categoria_empresa')=0, 'ALTER TABLE `documentos` ADD COLUMN `categoria_empresa` VARCHAR(30) NULL', 'SELECT 1');
+PREPARE gestor_ddl FROM @sql; EXECUTE gestor_ddl; DEALLOCATE PREPARE gestor_ddl;
 
 -- Catalogo de modelos generales y borradores del administrador.
 CREATE TABLE IF NOT EXISTS `gestor_documental_catalogo` (
@@ -169,15 +177,6 @@ SET @sql = IF((SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SC
 PREPARE gestor_ddl FROM @sql; EXECUTE gestor_ddl; DEALLOCATE PREPARE gestor_ddl;
 
 -- Inserta categorias que falten sin sobrescribir cambios del administrador.
-INSERT INTO `gestor_documental_categorias` (`codigo`,`numero`,`parent_id`,`nombre`,`orden`,`activo`,`created_at`,`updated_at`) SELECT '0','0',NULL,'DOCUMENTOS LEGALES',1,1,NOW(),NOW() WHERE NOT EXISTS (SELECT 1 FROM `gestor_documental_categorias` WHERE `codigo`='0');
-INSERT INTO `gestor_documental_catalogo` (`source_code`,`categoria_id`,`nombre`,`orden`,`activo`,`created_at`,`updated_at`) SELECT 'xlsx-row-8',(SELECT `id` FROM `gestor_documental_categorias` WHERE `codigo`='0' LIMIT 1),'Certificado de existencia y representación legal (vigente)',1,1,NOW(),NOW() WHERE NOT EXISTS (SELECT 1 FROM `gestor_documental_catalogo` WHERE `source_code`='xlsx-row-8');
-INSERT INTO `gestor_documental_catalogo` (`source_code`,`categoria_id`,`nombre`,`orden`,`activo`,`created_at`,`updated_at`) SELECT 'xlsx-row-9',(SELECT `id` FROM `gestor_documental_categorias` WHERE `codigo`='0' LIMIT 1),'RUT actualizado con actividad económica (código CIIU)',2,1,NOW(),NOW() WHERE NOT EXISTS (SELECT 1 FROM `gestor_documental_catalogo` WHERE `source_code`='xlsx-row-9');
-INSERT INTO `gestor_documental_catalogo` (`source_code`,`categoria_id`,`nombre`,`orden`,`activo`,`created_at`,`updated_at`) SELECT 'xlsx-row-10',(SELECT `id` FROM `gestor_documental_categorias` WHERE `codigo`='0' LIMIT 1),'Registro mercantil vigente',3,1,NOW(),NOW() WHERE NOT EXISTS (SELECT 1 FROM `gestor_documental_catalogo` WHERE `source_code`='xlsx-row-10');
-INSERT INTO `gestor_documental_catalogo` (`source_code`,`categoria_id`,`nombre`,`orden`,`activo`,`created_at`,`updated_at`) SELECT 'xlsx-row-11',(SELECT `id` FROM `gestor_documental_categorias` WHERE `codigo`='0' LIMIT 1),'Sucursales',4,1,NOW(),NOW() WHERE NOT EXISTS (SELECT 1 FROM `gestor_documental_catalogo` WHERE `source_code`='xlsx-row-11');
-INSERT INTO `gestor_documental_catalogo` (`source_code`,`categoria_id`,`nombre`,`orden`,`activo`,`created_at`,`updated_at`) SELECT 'xlsx-row-12',(SELECT `id` FROM `gestor_documental_categorias` WHERE `codigo`='0' LIMIT 1),'Representante Legal',5,1,NOW(),NOW() WHERE NOT EXISTS (SELECT 1 FROM `gestor_documental_catalogo` WHERE `source_code`='xlsx-row-12');
-INSERT INTO `gestor_documental_catalogo` (`source_code`,`categoria_id`,`nombre`,`orden`,`activo`,`created_at`,`updated_at`) SELECT 'xlsx-row-13',(SELECT `id` FROM `gestor_documental_categorias` WHERE `codigo`='0' LIMIT 1),'Pólizas de seguros empresariales Vigente.',6,1,NOW(),NOW() WHERE NOT EXISTS (SELECT 1 FROM `gestor_documental_catalogo` WHERE `source_code`='xlsx-row-13');
-INSERT INTO `gestor_documental_catalogo` (`source_code`,`categoria_id`,`nombre`,`orden`,`activo`,`created_at`,`updated_at`) SELECT 'xlsx-row-14',(SELECT `id` FROM `gestor_documental_categorias` WHERE `codigo`='0' LIMIT 1),'Organigrama De La Empresa/  Jerarquias.',7,1,NOW(),NOW() WHERE NOT EXISTS (SELECT 1 FROM `gestor_documental_catalogo` WHERE `source_code`='xlsx-row-14');
-INSERT INTO `gestor_documental_catalogo` (`source_code`,`categoria_id`,`nombre`,`orden`,`activo`,`created_at`,`updated_at`) SELECT 'xlsx-row-15',(SELECT `id` FROM `gestor_documental_categorias` WHERE `codigo`='0' LIMIT 1),'Logo',8,1,NOW(),NOW() WHERE NOT EXISTS (SELECT 1 FROM `gestor_documental_catalogo` WHERE `source_code`='xlsx-row-15');
 INSERT INTO `gestor_documental_categorias` (`codigo`,`numero`,`parent_id`,`nombre`,`orden`,`activo`,`created_at`,`updated_at`) SELECT '1','1',NULL,'REGLAMENTO INTERNO DE TRABAJO',2,1,NOW(),NOW() WHERE NOT EXISTS (SELECT 1 FROM `gestor_documental_categorias` WHERE `codigo`='1');
 INSERT INTO `gestor_documental_catalogo` (`source_code`,`categoria_id`,`nombre`,`orden`,`activo`,`created_at`,`updated_at`) SELECT 'xlsx-row-19',(SELECT `id` FROM `gestor_documental_categorias` WHERE `codigo`='1' LIMIT 1),'Reglamento Interno de Trabajo adoptado y vigente',1,1,NOW(),NOW() WHERE NOT EXISTS (SELECT 1 FROM `gestor_documental_catalogo` WHERE `source_code`='xlsx-row-19');
 INSERT INTO `gestor_documental_catalogo` (`source_code`,`categoria_id`,`nombre`,`orden`,`activo`,`created_at`,`updated_at`) SELECT 'xlsx-row-20',(SELECT `id` FROM `gestor_documental_categorias` WHERE `codigo`='1' LIMIT 1),'Socializacion de RIT. Evidencia',2,1,NOW(),NOW() WHERE NOT EXISTS (SELECT 1 FROM `gestor_documental_catalogo` WHERE `source_code`='xlsx-row-20');
@@ -462,7 +461,31 @@ WHERE s.tipo_solicitud='gestor_paquete' AND s.gestor_categoria_id IS NOT NULL
 UPDATE `gestor_documental_categorias` SET `numero`='5.6' WHERE `codigo`='5.5-gestion-de-turno-y-horarios-laborales' AND `numero`='5.5';
 UPDATE `gestor_documental_categorias` SET `numero`='5.7' WHERE `codigo`='5.5-gestion-documental-del-proceso' AND `numero`='5.5';
 
--- Verificacion: 24 categorias/subcategorias y 250 documentos base.
-SELECT COUNT(*) AS categorias_y_subcategorias FROM `gestor_documental_categorias`;
+-- Retira la categoria 0 (DOCUMENTOS LEGALES: documentos unicos de la empresa) del Gestor Documental general.
+DELETE FROM `gestor_documental_catalogo` WHERE `categoria_id` IN (SELECT `id` FROM (SELECT `id` FROM `gestor_documental_categorias` WHERE `codigo`='0') t);
+DELETE FROM `gestor_documental_categorias` WHERE `codigo`='0';
+
+-- Seccion Documentos adicionales (Memorando, Contrato a tiempo parcial, Contrato a termino indefinido).
+INSERT INTO `gestor_documental_categorias` (`codigo`,`numero`,`parent_id`,`nombre`,`seccion`,`orden`,`activo`,`created_at`,`updated_at`)
+SELECT 'adicionales-1','01',NULL,'DOCUMENTOS ADICIONALES','adicionales',1,1,NOW(),NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `gestor_documental_categorias` WHERE `codigo`='adicionales-1');
+INSERT INTO `gestor_documental_catalogo` (`source_code`,`categoria_id`,`nombre`,`orden`,`activo`,`created_at`,`updated_at`)
+SELECT 'adicional-memorando',(SELECT `id` FROM `gestor_documental_categorias` WHERE `codigo`='adicionales-1' LIMIT 1),'Memorando',1,1,NOW(),NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `gestor_documental_catalogo` WHERE `source_code`='adicional-memorando');
+INSERT INTO `gestor_documental_catalogo` (`source_code`,`categoria_id`,`nombre`,`orden`,`activo`,`created_at`,`updated_at`)
+SELECT 'adicional-contrato-tiempo-parcial',(SELECT `id` FROM `gestor_documental_categorias` WHERE `codigo`='adicionales-1' LIMIT 1),'Contrato a tiempo parcial',2,1,NOW(),NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `gestor_documental_catalogo` WHERE `source_code`='adicional-contrato-tiempo-parcial');
+INSERT INTO `gestor_documental_catalogo` (`source_code`,`categoria_id`,`nombre`,`orden`,`activo`,`created_at`,`updated_at`)
+SELECT 'adicional-contrato-termino-indefinido',(SELECT `id` FROM `gestor_documental_categorias` WHERE `codigo`='adicionales-1' LIMIT 1),'Contrato a término indefinido',3,1,NOW(),NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `gestor_documental_catalogo` WHERE `source_code`='adicional-contrato-termino-indefinido');
+
+-- Clasificacion de documento_tipos en 'empresa' y 'legales'.
+UPDATE `documento_tipos` SET `categoria`='legales' WHERE `nombre` IN ('Reglamento interno de trabajo','Reglamento interno','Políticas corporativas','Manual de funciones','Contratos laborales vigentes','Contratos','Horarios laborales','Matriz de riesgos laborales','Quejas o reclamaciones');
+INSERT INTO `documento_tipos` (`nombre`,`descripcion`,`categoria`,`orden`,`activo`,`created_at`,`updated_at`)
+SELECT 'Políticas corporativas','Políticas de prevención, acoso laboral, tratamiento de datos y demás políticas internas.','legales',11,1,NOW(),NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `documento_tipos` WHERE `nombre`='Políticas corporativas');
+
+-- Verificacion: 23 categorias/subcategorias y 242 documentos en seccion general + 1 categoria y 3 documentos en adicionales.
+SELECT `seccion`, COUNT(*) AS categorias_y_subcategorias FROM `gestor_documental_categorias` GROUP BY `seccion`;
 SELECT COUNT(*) AS documentos_catalogo FROM `gestor_documental_catalogo`;
 SELECT `numero`,`nombre` FROM `gestor_documental_categorias` WHERE `parent_id`=(SELECT `id` FROM `gestor_documental_categorias` WHERE `codigo`='5' LIMIT 1) ORDER BY `orden`;

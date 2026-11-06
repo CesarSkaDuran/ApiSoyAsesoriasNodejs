@@ -6,6 +6,7 @@ import {
   listDocuments, uploadDocument, downloadDocument, updateDocument, deleteDocument, listTypes,
   listCatalog, listAdminCatalog, updateCatalogDocument, uploadDraft, downloadDraft,
   uploadCatalogDocument, downloadCatalogDocument, createCatalogRequest, createCatalogCategory,
+  createCatalogDocument,
 } from '../controllers/gestor-documental.controller.js'
 
 const router = Router()
@@ -16,6 +17,7 @@ router.get('/tipos', listTypes)
 router.get('/catalogo', listCatalog)
 router.get('/admin/catalogo', requireRole('admin'), listAdminCatalog)
 router.post('/admin/categorias', requireRole('admin'), createCatalogCategory)
+router.post('/admin/catalogo', requireRole('admin'), createCatalogDocument)
 router.put('/admin/catalogo/:id', requireRole('admin'), updateCatalogDocument)
 router.post('/admin/catalogo/:id/borrador', requireRole('admin'), upload.single('file'), uploadDraft)
 router.get('/catalogo/:id/borrador', downloadDraft)
