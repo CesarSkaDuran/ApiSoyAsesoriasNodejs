@@ -179,6 +179,7 @@ const MAESTROS = {
       txt('direccion', 'Dirección'),
       sel('ciudad_id', 'Ciudad', 'ciudades'),
       txt('codigo_pila', 'Código sucursal PILA (5 díg.)'),
+      bool('activo', 'Activa'),
     ],
     joins: [
       { fk: 'empresa_id', table: 'empresas', col: 'razon_social', alias: 'empresa_nombre' },
@@ -186,6 +187,9 @@ const MAESTROS = {
     ],
     usadoEn: [
       { table: 'empleados', col: 'sucursal_id', label: 'empleados' },
+      { table: 'nominas', col: 'sucursal_id', label: 'nóminas' },
+      { table: 'nomina_detalles', col: 'sucursal_id', label: 'detalles de nómina' },
+      { table: 'planillas', col: 'sucursal_id', label: 'planillas' },
       { table: 'cuentas_cobro', col: 'sucursal_id', label: 'cuentas de cobro' },
       { table: 'gastos', col: 'sucursal_id', label: 'gastos' },
       { table: 'servicio_registros', col: 'sucursal_id', label: 'registros de servicio' },

@@ -20,16 +20,39 @@ function validarIngresos(body) {
 export async function list(req, res) {
   const { periodo, status, page = 1, per_page = 25 } = req.query
   const empresaId = esStaff(req.user) ? req.query.empresa_id : req.user.empresa_id
+  const sucursalId = req.query.sucursal_id ? Number(req.query.sucursal_id) : null
+  if (req.query.sucursal_id && (!Number.isInteger(sucursalId) || sucursalId < 1)) {
+    return res.status(400).json({ error: 'sucursal_id no válido' })
+  }
+  if (sucursalId) {
+    const sucursal = await db('sucursales').where('id', sucursalId).first('id', 'empresa_id')
+    if (!sucursal) return res.status(404).json({ error: 'Sucursal no encontrada' })
+    if (empresaId && Number(sucursal.empresa_id) !== Number(empresaId)) {
+      return res.status(400).json({ error: 'La sucursal no pertenece a la empresa filtrada' })
+    }
+    if (!esStaff(req.user) && Number(sucursal.empresa_id) !== Number(req.user.empresa_id)) {
+      return res.status(403).json({ error: 'Sin acceso a esta sucursal' })
+    }
+  }
 
   const query = db('planillas')
     .leftJoin('empresas', 'planillas.empresa_id', 'empresas.id')
     .leftJoin('personas', 'planillas.persona_id', 'personas.id')
     .leftJoin('nominas', 'planillas.nomina_id', 'nominas.id')
+    .leftJoin('sucursales as s', 'planillas.sucursal_id', 's.id')
     .select('planillas.*', 'empresas.razon_social as empresa_nombre',
       db.raw("CONCAT_WS(' ', personas.primer_nombre, personas.segundo_nombre, personas.primer_apellido, personas.segundo_apellido) as persona_nombre"),
-      'nominas.nombre_periodo', 'nominas.num_empleados', 'nominas.total_otros_pagos',
+      db.raw('COALESCE(planillas.nombre_periodo, nominas.nombre_periodo, planillas.periodo) as nombre_periodo'),
+      db.raw(`COALESCE(nominas.num_empleados,
+        (SELECT COALESCE(SUM(n2.num_empleados), 0) FROM planilla_nominas pn
+          JOIN nominas n2 ON n2.id=pn.nomina_id WHERE pn.planilla_id=planillas.id), 0) as num_empleados`),
+      'nominas.total_otros_pagos',
+      db.raw('COALESCE(planillas.sucursal_nombre, s.nombre) as sucursal_nombre'),
+      db.raw('(SELECT COUNT(*) FROM planilla_nominas pn WHERE pn.planilla_id=planillas.id) as nominas_incluidas'),
       db.raw(`(SELECT COALESCE(SUM(nd.salario_base * nd.dias_laborados / 30), 0)
-        FROM nomina_detalles nd WHERE nd.nomina_id = nominas.id) as salario_dias`))
+        FROM planilla_nominas pn2
+        JOIN nomina_detalles nd ON nd.nomina_id=pn2.nomina_id
+        WHERE pn2.planilla_id=planillas.id) as salario_dias`))
 
   if (!esStaff(req.user)) {
     if (req.user.role === 'independiente') query.where('planillas.persona_id', req.user.persona_id || -1)
@@ -39,6 +62,7 @@ export async function list(req, res) {
   }
   if (periodo) query.where('planillas.periodo', periodo)
   if (status) query.where('planillas.status', status)
+  if (sucursalId) query.where('planillas.sucursal_id', sucursalId)
 
   const [{ total }] = await query.clone().count('* as total')
   const data = await query
@@ -67,8 +91,14 @@ export async function show(req, res) {
     || (planilla.persona_id && req.user.role === 'independiente' && planilla.persona_id === req.user.persona_id)
     || (planilla.empresa_id && canAccessEmpresa(req.user, planilla.empresa_id))
   if (!autorizado) return res.status(403).json({ error: 'Sin acceso' })
-  const documentos = await db('documentos').where('planilla_id', planilla.id)
-  res.json({ planilla, documentos })
+  const [documentos, nominas] = await Promise.all([
+    db('documentos').where('planilla_id', planilla.id),
+    db('planilla_nominas as pn')
+      .join('nominas as n', 'n.id', 'pn.nomina_id')
+      .where('pn.planilla_id', planilla.id)
+      .select('n.id', 'n.nombre_periodo', 'n.sucursal_id', 'n.sucursal_nombre', 'n.num_empleados', 'n.total_costo_empresa'),
+  ])
+  res.json({ planilla, documentos, nominas })
 }
 
 // POST /planillas - admin registra planilla generada/pagada
@@ -118,18 +148,30 @@ export async function create(req, res) {
   }
 
   if (!esStaff(req.user)) return res.status(403).json({ error: 'Sin permiso para esta accion' })
-  const { empresa_id, nomina_id, numero_planilla, periodo, valor_total, fecha_pago } = req.body
+  const { empresa_id, nomina_id, sucursal_id, numero_planilla, periodo, valor_total, fecha_pago } = req.body
   if (!empresa_id) return res.status(400).json({ error: 'empresa_id requerido' })
+  if (nomina_id) {
+    const nomina = await db('nominas').where({ id: nomina_id, empresa_id }).first('id')
+    if (!nomina) return res.status(400).json({ error: 'La nómina no pertenece a la empresa indicada' })
+  }
+  if (sucursal_id) {
+    const sucursal = await db('sucursales').where({ id: sucursal_id, empresa_id, activo: true }).first('id')
+    if (!sucursal) return res.status(400).json({ error: 'La sucursal no pertenece a la empresa o está inactiva' })
+  }
 
   const [id] = await db('planillas').insert({
     empresa_id,
     nomina_id: nomina_id || null,
+    sucursal_id: sucursal_id || null,
     numero_planilla: numero_planilla || null,
     periodo: periodo || null,
     valor_total: valor_total ?? 0,
     fecha_pago: fecha_pago || null,
     status: 'generada',
   })
+  if (nomina_id) {
+    await db('planilla_nominas').insert({ planilla_id: id, nomina_id })
+  }
   const planilla = await db('planillas').where('id', id).first()
   res.status(201).json({ planilla })
 }

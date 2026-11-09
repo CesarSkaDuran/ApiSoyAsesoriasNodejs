@@ -33,7 +33,7 @@ function splitNoc(d) {
 
 const COLUMNAS = [
   'nomina_id', 'periodo', 'fecha_inicio', 'fecha_fin',
-  'empleado_id', 'tipo_documento', 'numero_documento', 'apellidos', 'nombres', 'cargo',
+  'empleado_id', 'tipo_documento', 'numero_documento', 'apellidos', 'nombres', 'cargo', 'sucursal_obra',
   'dias_laborados', 'dias_incapacidad',
   'salario_base', 'aux_transporte', 'horas_extras', 'otros_ingresos_salariales',
   'ingreso_noc_incr', 'ingreso_noc_gravable', 'total_devengado',
@@ -61,6 +61,7 @@ function fila(nomina, d) {
     TXT([d.primer_apellido, d.segundo_apellido].filter(Boolean).join(' ')),
     TXT([d.primer_nombre, d.segundo_nombre].filter(Boolean).join(' ')),
     TXT(d.cargo_nombre),
+    TXT(d.sucursal_nombre),
     d.dias_laborados ?? 0,
     d.dias_incapacidad ?? 0,
     DEC(d.salario_base), DEC(d.aux_transporte), DEC(d.horas_extras), DEC(d.otros_ingresos),
@@ -109,7 +110,7 @@ export function planoNomina(nomina, detalles) {
 
 // Segundo archivo: empleado × concepto, desde el snapshot ingresos_detalle.
 const COLUMNAS_CONCEPTOS = [
-  'nomina_id', 'empleado_id', 'numero_documento', 'apellidos', 'nombres',
+  'nomina_id', 'empleado_id', 'numero_documento', 'apellidos', 'nombres', 'sucursal_obra',
   'concepto_id', 'concepto', 'valor', 'constitutivo_salario',
   'tratamiento_fiscal', 'incr_parte', 'gravable_parte',
 ]
@@ -122,6 +123,7 @@ export function planoConceptos(nomina, detalles) {
         nomina.id, d.empleado_id, TXT(d.numero_documento),
         TXT([d.primer_apellido, d.segundo_apellido].filter(Boolean).join(' ')),
         TXT([d.primer_nombre, d.segundo_nombre].filter(Boolean).join(' ')),
+        TXT(d.sucursal_nombre),
         r.concepto_id ?? '', TXT(r.concepto), DEC(r.valor),
         r.constitutivo_salario ? 'SI' : 'NO',
         TXT(r.tratamiento_fiscal), DEC(r.incr_parte), DEC(r.gravable_parte),

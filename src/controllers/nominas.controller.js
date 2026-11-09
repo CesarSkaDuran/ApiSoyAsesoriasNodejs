@@ -269,7 +269,7 @@ export async function updateConcepto(req, res) {
 
 // GET /nominas - scoped: empresa ve solo las suyas; admin ve todas o filtra por ?empresa_id
 export async function list(req, res) {
-  const empresaId = esStaff(req.user)
+  let empresaId = esStaff(req.user)
     ? req.query.empresa_id
     : req.user.empresa_id
 
@@ -278,15 +278,34 @@ export async function list(req, res) {
   }
 
   const { status, page = 1, per_page = 25 } = req.query
+  const sucursalId = req.query.sucursal_id ? Number(req.query.sucursal_id) : null
+  if (req.query.sucursal_id && (!Number.isInteger(sucursalId) || sucursalId < 1)) {
+    return res.status(400).json({ error: 'sucursal_id no válido' })
+  }
+  if (sucursalId) {
+    const sucursal = await db('sucursales').where('id', sucursalId).first('id', 'empresa_id')
+    if (!sucursal) return res.status(404).json({ error: 'Sucursal no encontrada' })
+    if (empresaId && Number(sucursal.empresa_id) !== Number(empresaId)) {
+      return res.status(400).json({ error: 'La sucursal no pertenece a la empresa filtrada' })
+    }
+    if (!esStaff(req.user) && Number(sucursal.empresa_id) !== Number(req.user.empresa_id)) {
+      return res.status(403).json({ error: 'Sin acceso a esta sucursal' })
+    }
+    if (esStaff(req.user) && !empresaId) empresaId = sucursal.empresa_id
+  }
 
   const query = db('nominas')
     .leftJoin('empresas', 'nominas.empresa_id', 'empresas.id')
+    .leftJoin('sucursales as s', 'nominas.sucursal_id', 's.id')
     .select('nominas.*', 'empresas.razon_social as empresa_nombre',
+      'empresas.pila_modalidad as pila_modalidad',
+      db.raw('COALESCE(nominas.sucursal_nombre, s.nombre) as sucursal_nombre'),
       db.raw(`(SELECT COALESCE(SUM(nd.salario_base * nd.dias_laborados / 30), 0)
         FROM nomina_detalles nd WHERE nd.nomina_id = nominas.id) as salario_dias`))
     .orderBy('nominas.id', 'desc')
 
   if (empresaId) query.where('nominas.empresa_id', empresaId)
+  if (sucursalId) query.where('nominas.sucursal_id', sucursalId)
   if (status) query.where('nominas.status', status)
 
   const [{ total }] = await query.clone().count('* as total')
@@ -301,7 +320,13 @@ export async function list(req, res) {
 export async function show(req, res) {
   const nomina = await db('nominas')
     .leftJoin('empresas', 'nominas.empresa_id', 'empresas.id')
-    .select('nominas.*', 'empresas.razon_social as empresa_nombre')
+    .leftJoin('sucursales as s', 'nominas.sucursal_id', 's.id')
+    .select(
+      'nominas.*',
+      'empresas.razon_social as empresa_nombre',
+      'empresas.pila_modalidad as pila_modalidad',
+      db.raw('COALESCE(nominas.sucursal_nombre, s.nombre) as sucursal_nombre')
+    )
     .where('nominas.id', req.params.id)
     .first()
   if (!nomina) return res.status(404).json({ error: 'Nomina no encontrada' })
@@ -324,8 +349,29 @@ export async function show(req, res) {
 
 // POST /nominas - admin crea la cabecera (borrador) para una empresa/periodo
 export async function create(req, res) {
-  const { empresa_id, nombre_periodo } = req.body
-  if (!empresa_id) return res.status(400).json({ error: 'empresa_id requerido' })
+  const empresaId = Number(req.body.empresa_id)
+  const { nombre_periodo } = req.body
+  if (!Number.isInteger(empresaId) || empresaId < 1) {
+    return res.status(400).json({ error: 'empresa_id requerido' })
+  }
+  const empresa = await db('empresas').where('id', empresaId).first('id', 'pila_modalidad')
+  if (!empresa) return res.status(404).json({ error: 'Empresa no encontrada' })
+
+  const sucursalId = req.body.sucursal_id ? Number(req.body.sucursal_id) : null
+  let sucursalNombre = null
+  if (req.body.sucursal_id && (!Number.isInteger(sucursalId) || sucursalId < 1)) {
+    return res.status(400).json({ error: 'sucursal_id no válido' })
+  }
+  if (empresa.pila_modalidad === 'por_sucursal' && !sucursalId) {
+    return res.status(400).json({ error: 'Selecciona una sucursal para liquidar la nómina en modalidad PILA separada' })
+  }
+  if (sucursalId) {
+    const sucursal = await db('sucursales')
+      .where({ id: sucursalId, empresa_id: empresaId, activo: true })
+      .first('id', 'nombre')
+    if (!sucursal) return res.status(400).json({ error: 'La sucursal no pertenece a la empresa o está inactiva' })
+    sucursalNombre = sucursal.nombre
+  }
 
   const yearFromLabel = String(nombre_periodo || '').match(/\b(20\d{2})\b/)
   const vigencia = Number(req.body.vigencia || yearFromLabel?.[1] || new Date().getFullYear())
@@ -338,17 +384,47 @@ export async function create(req, res) {
     }
   }
 
-  const [id] = await db('nominas').insert({
-    empresa_id,
-    nombre_periodo: nombre_periodo || null,
-    vigencia,
-    dias_periodo: Number(req.body.dias_periodo) === 15 ? 15 : 30,
-    aplica_exoneracion: req.body.aplica_exoneracion === true || req.body.aplica_exoneracion === 1,
-    fecha_inicio: req.body.fecha_inicio || null,
-    fecha_fin: req.body.fecha_fin || null,
-    status: 'borrador',
-  })
-  res.status(201).json({ nomina: await db('nominas').where('id', id).first() })
+  let nomina
+  try {
+    nomina = await db.transaction(async trx => {
+      await trx('empresas').where('id', empresaId).forUpdate().first('id')
+      const duplicada = trx('nominas').where('empresa_id', empresaId)
+        .whereIn('status', ['borrador', 'liquidada', 'pagada'])
+      if (sucursalId) {
+        duplicada.where(q => q.where('sucursal_id', sucursalId).orWhereNull('sucursal_id'))
+      }
+      if (req.body.fecha_inicio && req.body.fecha_fin) {
+        duplicada.whereNotNull('fecha_inicio').whereNotNull('fecha_fin')
+          .where('fecha_inicio', '<=', req.body.fecha_fin)
+          .where('fecha_fin', '>=', req.body.fecha_inicio)
+      } else {
+        duplicada.where('vigencia', vigencia)
+          .where('nombre_periodo', nombre_periodo || null)
+      }
+      if (await duplicada.first('id')) {
+        throw Object.assign(new Error(
+          'Ya existe una nómina que se cruza con este período para esta sucursal o para toda la empresa'
+        ), { status: 409 })
+      }
+      const [id] = await trx('nominas').insert({
+        empresa_id: empresaId,
+        sucursal_id: sucursalId,
+        sucursal_nombre: sucursalNombre,
+        nombre_periodo: nombre_periodo || null,
+        vigencia,
+        dias_periodo: Number(req.body.dias_periodo) === 15 ? 15 : 30,
+        aplica_exoneracion: req.body.aplica_exoneracion === true || req.body.aplica_exoneracion === 1,
+        fecha_inicio: req.body.fecha_inicio || null,
+        fecha_fin: req.body.fecha_fin || null,
+        status: 'borrador',
+      })
+      return trx('nominas').where('id', id).first()
+    })
+  } catch (error) {
+    if (error.status === 409) return res.status(409).json({ error: error.message })
+    throw error
+  }
+  res.status(201).json({ nomina })
 }
 
 export async function liquidar(req, res) {
@@ -378,12 +454,18 @@ export async function liquidar(req, res) {
   }
   parametros.festivos = Object.fromEntries(festivosMap)
 
-  const empleados = await db('empleados')
+  const empleadosQuery = db('empleados')
     .where('empresa_id', nomina.empresa_id)
     .whereIn('id', empleadoIds)
     .where(builder => builder.whereNull('tipo_contrato').orWhereNotIn('tipo_contrato', ['prestacion', 'aprendizaje']))
+  if (nomina.sucursal_id) empleadosQuery.where('sucursal_id', nomina.sucursal_id)
+  const empleados = await empleadosQuery
   if (empleados.length !== empleadoIds.length) {
-    return res.status(400).json({ error: 'La nómina incluye empleados no válidos o con contrato de prestación/aprendizaje, que requieren liquidación diferenciada' })
+    return res.status(400).json({
+      error: nomina.sucursal_id
+        ? 'La nómina incluye empleados de otra sucursal o con contrato de prestación/aprendizaje'
+        : 'La nómina incluye empleados no válidos o con contrato de prestación/aprendizaje, que requieren liquidación diferenciada',
+    })
   }
   const riesgosValidos = new Set(['I', 'II', 'III', 'IV', 'V'])
   const sinRiesgo = empleados.filter(empleado => !riesgosValidos.has(empleado.riesgo))
@@ -546,6 +628,11 @@ export async function liquidar(req, res) {
   const horasRows = []
   const ingresoRows = []
   const dedRows = []
+  const sucursalIds = [...new Set(empleados.map(e => Number(e.sucursal_id)).filter(Number.isInteger))]
+  const sucursales = sucursalIds.length
+    ? await db('sucursales').whereIn('id', sucursalIds).select('id', 'nombre')
+    : []
+  const sucursalNombrePorId = new Map(sucursales.map(s => [Number(s.id), s.nombre]))
   const detalles = empleados.map(empleado => {
     const submitted = items.find(i => Number(i.empleado_id) === empleado.id) || {}
     const ingresos = (Array.isArray(submitted.ingresos) ? submitted.ingresos : [])
@@ -615,7 +702,13 @@ export async function liquidar(req, res) {
     totales.aportes += detalle.total_aportes_empleador
     totales.prestaciones += detalle.total_prestaciones
     totales.costo += detalle.costo_empresa
-    return { nomina_id: nomina.id, empleado_id: empleado.id, ...detalle }
+    return {
+      nomina_id: nomina.id,
+      empleado_id: empleado.id,
+      sucursal_id: empleado.sucursal_id ?? null,
+      sucursal_nombre: sucursalNombrePorId.get(Number(empleado.sucursal_id)) ?? null,
+      ...detalle,
+    }
   })
 
   const actualizada = await db.transaction(async trx => {
@@ -687,6 +780,16 @@ export async function plano(req, res) {
 // GET /nominas/pila-estado - cobertura de datos requeridos por el archivo PILA.
 // Con ?empresa_id detalla también las brechas del aportante y sus cotizantes.
 export async function pilaEstado(req, res) {
+  const empresaId = req.query.empresa_id ? Number(req.query.empresa_id) : null
+  if (req.query.empresa_id && (!Number.isInteger(empresaId) || empresaId < 1)) {
+    return res.status(400).json({ error: 'empresa_id no válido' })
+  }
+  const empresa = empresaId
+    ? await db('empresas').where('id', empresaId).first('id', 'pila_modalidad')
+    : null
+  if (empresaId && !empresa) return res.status(404).json({ error: 'Empresa no encontrada' })
+  const modalidad = empresa?.pila_modalidad || 'consolidada'
+
   const catalogos = {}
   for (const tabla of ['eps', 'arl', 'pensiones', 'cajas_compensacion']) {
     const [tot] = await db(tabla).where('activo', 1).count('id as n')
@@ -703,15 +806,16 @@ export async function pilaEstado(req, res) {
   const [cgTot] = await db('cargos').count('id as n')
   const [cgCon] = await db('cargos')
     .whereNotNull('codigo_ciuo').where('codigo_ciuo', '<>', '').count('id as n')
-  const [sTot] = await db('sucursales').count('id as n')
-  const [sCon] = await db('sucursales')
+  const sucursalesQ = db('sucursales').where('activo', true)
+  if (empresaId) sucursalesQ.where('empresa_id', empresaId)
+  const [sTot] = await sucursalesQ.clone().count('id as n')
+  const [sCon] = await sucursalesQ.clone()
     .whereNotNull('codigo_pila').where('codigo_pila', '<>', '').count('id as n')
   catalogos.departamentos = { total: Number(dTot.n), con_codigo: Number(dCon.n) }
   catalogos.ciudades = { total: Number(cTot.n), con_codigo: Number(cCon.n) }
   catalogos.cargos = { total: Number(cgTot.n), con_codigo: Number(cgCon.n) }
   catalogos.sucursales = { total: Number(sTot.n), con_codigo: Number(sCon.n) }
 
-  const empresaId = req.query.empresa_id ? Number(req.query.empresa_id) : null
   const empresasQ = db('empresas').where('status', 'activo')
   const empleadosQ = db('empleados').where('status', 'activo')
     .where(b => b.whereNull('tipo_contrato').orWhereNotIn('tipo_contrato', ['prestacion', 'aprendizaje']))
@@ -723,11 +827,16 @@ export async function pilaEstado(req, res) {
   const [sinEps] = await empresasQ.clone().whereNull('eps_id').count('id as n')
   const [sinCot] = await empleadosQ.clone().whereNull('tipo_cotizante').count('id as n')
   const [sinTrab] = await empleadosQ.clone().whereNull('tipo_trabajador').count('id as n')
+  const [sucursalesSinCodigo] = await sucursalesQ.clone()
+    .where(q => q.whereNull('codigo_pila').orWhere('codigo_pila', ''))
+    .count('id as n')
 
   res.json({
     catalogos,
     aportantes: { sin_arl: Number(sinArl.n), sin_eps: Number(sinEps.n) },
     cotizantes: { sin_tipo_cotizante: Number(sinCot.n), sin_tipo_trabajador: Number(sinTrab.n) },
+    pila_modalidad: modalidad,
+    sucursales_pendientes: modalidad === 'por_sucursal' ? Number(sucursalesSinCodigo.n) : 0,
   })
 }
 
@@ -761,21 +870,145 @@ export async function generarPlanilla(req, res) {
     return res.status(400).json({ error: 'La nomina debe estar liquidada' })
   }
 
-  // Reutilizar planilla existente para la misma nomina (idempotente)
-  const existente = await db('planillas').where('nomina_id', nomina.id).first()
-  if (existente) {
-    return res.json({ planilla: existente, existente: true })
+  const empresa = await db('empresas').where('id', nomina.empresa_id).first('pila_modalidad')
+  const modalidad = empresa?.pila_modalidad || 'consolidada'
+  let sucursalPlanilla = null
+  if (modalidad === 'por_sucursal') {
+    if (!nomina.sucursal_id) {
+      return res.status(409).json({ error: 'La empresa separa PILA por sucursal; esta nómina no tiene una sucursal asignada' })
+    }
+    const sucursal = await db('sucursales')
+      .where({ id: nomina.sucursal_id, empresa_id: nomina.empresa_id })
+      .first('id', 'nombre', 'codigo_pila', 'activo')
+    if (!sucursal || !sucursal.activo) {
+      return res.status(409).json({ error: 'La sucursal de la nómina no está activa' })
+    }
+    if (!/^\d{5}$/.test(String(sucursal.codigo_pila || ''))) {
+      return res.status(409).json({ error: `Completa el código PILA de 5 dígitos para "${sucursal.nombre}" antes de generar su planilla` })
+    }
+    sucursalPlanilla = sucursal
   }
 
-  const [id] = await db('planillas').insert({
-    empresa_id: nomina.empresa_id,
-    nomina_id: nomina.id,
-    periodo: nomina.nombre_periodo,
-    valor_total: nomina.total_seguridad_social || 0,
-    status: 'generada',
+  const payrollsQuery = db('nominas')
+    .where('empresa_id', nomina.empresa_id)
+    .whereIn('status', ['liquidada', 'pagada'])
+  if (nomina.fecha_inicio && nomina.fecha_fin) {
+    payrollsQuery.where({
+      fecha_inicio: nomina.fecha_inicio,
+      fecha_fin: nomina.fecha_fin,
+    })
+  } else {
+    payrollsQuery.where('vigencia', nomina.vigencia)
+      .where('nombre_periodo', nomina.nombre_periodo)
+  }
+  let payrolls = await payrollsQuery.orderBy('sucursal_id').select(
+    'id', 'empresa_id', 'sucursal_id', 'sucursal_nombre', 'nombre_periodo',
+    'vigencia', 'fecha_inicio', 'fecha_fin', 'num_empleados',
+    'total_seguridad_social', 'status'
+  )
+
+  if (modalidad === 'por_sucursal') {
+    payrolls = payrolls.filter(row => Number(row.id) === Number(nomina.id))
+  } else {
+    const nominaEmpresaCompleta = payrolls.find(row => row.sucursal_id === null)
+    if (nominaEmpresaCompleta) {
+      payrolls = [nominaEmpresaCompleta]
+    } else {
+      const empleadosSinSucursal = await db('empleados')
+        .where({ empresa_id: nomina.empresa_id, status: 'activo' })
+        .whereNull('sucursal_id')
+        .where(builder => builder.whereNull('tipo_contrato').orWhereNotIn('tipo_contrato', ['prestacion', 'aprendizaje']))
+        .count('id as total')
+        .first()
+      if (Number(empleadosSinSucursal.total)) {
+        return res.status(409).json({
+          error: 'No se puede consolidar la PILA: asigna una sucursal a todos los empleados activos',
+          empleados_sin_sucursal: Number(empleadosSinSucursal.total),
+        })
+      }
+
+      const sucursalesConEmpleados = await db('empleados')
+        .where({ empresa_id: nomina.empresa_id, status: 'activo' })
+        .whereNotNull('sucursal_id')
+        .where(builder => builder.whereNull('tipo_contrato').orWhereNotIn('tipo_contrato', ['prestacion', 'aprendizaje']))
+        .distinct('sucursal_id')
+        .pluck('sucursal_id')
+      const payrollBySucursal = new Map(payrolls
+        .filter(row => row.sucursal_id !== null)
+        .map(row => [Number(row.sucursal_id), row]))
+      const sucursalesFaltantes = sucursalesConEmpleados
+        .map(Number)
+        .filter(id => !payrollBySucursal.has(id))
+      if (sucursalesFaltantes.length) {
+        const faltantes = await db('sucursales').whereIn('id', sucursalesFaltantes).select('nombre')
+        return res.status(409).json({
+          error: `Antes de consolidar la PILA, liquida las sucursales: ${faltantes.map(s => s.nombre).join(', ')}`,
+          sucursales_pendientes: faltantes.map(s => s.nombre),
+        })
+      }
+
+      for (const sucursalId of sucursalesConEmpleados.map(Number)) {
+        const payroll = payrollBySucursal.get(sucursalId)
+        const [activos] = await db('empleados')
+          .where({ empresa_id: nomina.empresa_id, sucursal_id: sucursalId, status: 'activo' })
+          .where(builder => builder.whereNull('tipo_contrato').orWhereNotIn('tipo_contrato', ['prestacion', 'aprendizaje']))
+          .count('id as total')
+        const [incluidos] = await db('nomina_detalles')
+          .where({ nomina_id: payroll.id, sucursal_id: sucursalId })
+          .count('id as total')
+        if (Number(incluidos.total) < Number(activos.total)) {
+          const sucursal = await db('sucursales').where('id', sucursalId).first('nombre')
+          return res.status(409).json({
+            error: `La nómina de "${sucursal.nombre}" no incluye todos sus empleados activos`,
+            empleados_activos: Number(activos.total),
+            empleados_liquidados: Number(incluidos.total),
+          })
+        }
+      }
+    }
+  }
+
+  if (!payrolls.length) {
+    return res.status(409).json({ error: 'No hay nóminas liquidadas para generar la planilla' })
+  }
+  const payrollIds = payrolls.map(row => Number(row.id))
+  const existingLinks = await db('planilla_nominas as pn')
+    .join('planillas as p', 'pn.planilla_id', 'p.id')
+    .whereIn('pn.nomina_id', payrollIds)
+    .select('p.*', 'pn.nomina_id')
+  if (existingLinks.length) {
+    const planillaIds = [...new Set(existingLinks.map(row => Number(row.id)))]
+    if (planillaIds.length === 1 && existingLinks.length === payrollIds.length) {
+      const planilla = await db('planillas').where('id', planillaIds[0]).first()
+      return res.json({ planilla, existente: true })
+    }
+    return res.status(409).json({ error: 'Una o más nóminas de este período ya están asociadas a otra planilla' })
+  }
+
+  const sumatoria = payrolls.reduce((sum, row) => sum + Number(row.total_seguridad_social || 0), 0)
+  const esSeparada = modalidad === 'por_sucursal'
+  const periodoPlanilla = nomina.fecha_inicio
+    ? String(nomina.fecha_inicio).slice(0, 7)
+    : String(nomina.vigencia || '').slice(0, 4)
+  const planilla = await db.transaction(async trx => {
+    const [id] = await trx('planillas').insert({
+      empresa_id: nomina.empresa_id,
+      sucursal_id: esSeparada ? nomina.sucursal_id : null,
+      sucursal_nombre: sucursalPlanilla?.nombre ?? null,
+      sucursal_codigo_pila: sucursalPlanilla?.codigo_pila ?? null,
+      nomina_id: payrollIds.length === 1 ? payrollIds[0] : null,
+      periodo: periodoPlanilla,
+      nombre_periodo: nomina.nombre_periodo || periodoPlanilla,
+      valor_total: round2(sumatoria),
+      status: 'generada',
+    })
+    await trx('planilla_nominas').insert(payrollIds.map(nominaId => ({
+      planilla_id: id,
+      nomina_id: nominaId,
+    })))
+    return trx('planillas').where('id', id).first()
   })
-  const planilla = await db('planillas').where('id', id).first()
-  res.status(201).json({ planilla })
+  res.status(201).json({ planilla, nominas_incluidas: payrollIds.length, modalidad })
 }
 
 // DELETE /nominas/:id - admin elimina (cascade detalles)

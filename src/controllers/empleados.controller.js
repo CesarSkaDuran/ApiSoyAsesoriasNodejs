@@ -11,7 +11,7 @@ const CAMPOS = [
   'tipo_documento', 'numero_documento', 'direccion', 'movil', 'email',
   'fecha_ingreso', 'fecha_retiro', 'salario_base', 'subsidio_transporte', 'auxilio_transporte_mode',
   'tipo_contrato', 'periodo_pago', 'riesgo', 'tipo_vinculacion',
-  'observaciones', 'status', 'sucursal_id', 'cargo_id', 'eps_id',
+  'observaciones', 'status', 'sucursal_id', 'cargo_id', 'centro_trabajo_id', 'eps_id',
   'arl_id', 'pension_id', 'caja_cf_id', 'ciudad_id',
   // Datos PILA (Res. 2388/2016) — solo alimentan el archivo plano
   'tipo_cotizante', 'subtipo_cotizante', 'tipo_trabajador', 'subtipo_trabajador',
@@ -73,7 +73,7 @@ function normalizarNombres(data) {
 
 // GET /empleados - scoped: empresa ve solo los suyos; admin filtra por ?empresa_id
 export async function list(req, res) {
-  const empresaId = esStaff(req.user)
+  let empresaId = esStaff(req.user)
     ? req.query.empresa_id
     : req.user.empresa_id
 
@@ -82,16 +82,35 @@ export async function list(req, res) {
   }
 
   const { search, status = 'activo', desde, hasta, page = 1, per_page = 25 } = req.query
+  const sucursalId = req.query.sucursal_id ? Number(req.query.sucursal_id) : null
+  if (req.query.sucursal_id && (!Number.isInteger(sucursalId) || sucursalId < 1)) {
+    return res.status(400).json({ error: 'sucursal_id no válido' })
+  }
+  if (sucursalId) {
+    const sucursal = await db('sucursales').where('id', sucursalId).first('id', 'empresa_id')
+    if (!sucursal) return res.status(404).json({ error: 'Sucursal no encontrada' })
+    if (!esStaff(req.user) && Number(sucursal.empresa_id) !== Number(empresaId)) {
+      return res.status(403).json({ error: 'La sucursal no pertenece a esta empresa' })
+    }
+    if (empresaId && Number(sucursal.empresa_id) !== Number(empresaId)) {
+      return res.status(400).json({ error: 'La sucursal seleccionada no pertenece a la empresa filtrada' })
+    }
+    if (esStaff(req.user) && !empresaId) empresaId = sucursal.empresa_id
+  }
 
   const query = db('empleados')
     .leftJoin('empresas', 'empleados.empresa_id', 'empresas.id')
     .leftJoin('cargos', 'empleados.cargo_id', 'cargos.id')
+    .leftJoin('sucursales as s', 'empleados.sucursal_id', 's.id')
+    .leftJoin('centros_trabajo as ct', 'empleados.centro_trabajo_id', 'ct.id')
     .leftJoin('eps', 'empleados.eps_id', 'eps.id')
     .leftJoin('personas as identidad', 'empleados.persona_id', 'identidad.id')
     .select('empleados.*', 'empresas.razon_social as empresa_nombre',
-      'cargos.nombre as cargo_nombre', 'eps.nombre as eps_nombre', 'identidad.fecha_nacimiento')
+      'cargos.nombre as cargo_nombre', 'ct.nombre as centro_trabajo_nombre',
+      's.nombre as sucursal_nombre', 'eps.nombre as eps_nombre', 'identidad.fecha_nacimiento')
 
   if (empresaId) query.where('empleados.empresa_id', empresaId)
+  if (sucursalId) query.where('empleados.sucursal_id', sucursalId)
 
   if (search) {
     query.where(q =>
@@ -131,6 +150,8 @@ export async function show(req, res) {
     db('empleados')
       .leftJoin('empresas', 'empleados.empresa_id', 'empresas.id')
       .leftJoin('cargos', 'empleados.cargo_id', 'cargos.id')
+      .leftJoin('sucursales as s', 'empleados.sucursal_id', 's.id')
+      .leftJoin('centros_trabajo as ct', 'empleados.centro_trabajo_id', 'ct.id')
       .leftJoin('eps', 'empleados.eps_id', 'eps.id')
       .leftJoin('arl', 'empleados.arl_id', 'arl.id')
       .leftJoin('pensiones', 'empleados.pension_id', 'pensiones.id')
@@ -140,6 +161,8 @@ export async function show(req, res) {
       .select(
         'empresas.razon_social as empresa_nombre',
         'cargos.nombre as cargo_nombre',
+        's.nombre as sucursal_nombre',
+        'ct.nombre as centro_trabajo_nombre',
         'eps.nombre as eps_nombre',
         'arl.nombre as arl_nombre',
         'pensiones.nombre as pension_nombre',
@@ -259,8 +282,18 @@ async function contratarEnEmpresa(req, res, nuevoEndpoint) {
     try {
       resultado = await db.transaction(async trx => {
         if (!await trx('empresas').where('id', empresaId).first('id')) throw errorIdentidad('Empresa no encontrada', 404)
-        if (data.sucursal_id && !await trx('sucursales').where({ id: data.sucursal_id, empresa_id: empresaId }).first('id')) {
+        if (data.sucursal_id && !await trx('sucursales')
+          .where({ id: data.sucursal_id, empresa_id: empresaId, activo: true })
+          .first('id')) {
           throw errorIdentidad('La sucursal no pertenece a la empresa de contratación')
+        }
+        if (data.centro_trabajo_id) {
+          const centro = await trx('centros_trabajo')
+            .where({ id: data.centro_trabajo_id, empresa_id: empresaId, activo: true })
+            .first('id', 'riesgo')
+          if (!centro) throw errorIdentidad('El centro de trabajo no pertenece a la empresa o está inactivo')
+          data.centro_trabajo_id = centro.id
+          data.riesgo = centro.riesgo
         }
         const { persona, existente } = await resolverIdentidad(trx, req.body)
         if (persona.tipo_documento === 'NIT') throw errorIdentidad('La identidad debe tener un documento personal, no NIT')
@@ -299,6 +332,27 @@ export async function update(req, res) {
   const data = {}
   for (const campo of CAMPOS) {
     if (req.body[campo] !== undefined) data[campo] = req.body[campo]
+  }
+  if (data.sucursal_id) {
+    const sucursal = await db('sucursales')
+      .where({ id: data.sucursal_id, empresa_id: empleado.empresa_id })
+      .first('id', 'activo')
+    const puedeConservarInactiva = Number(data.sucursal_id) === Number(empleado.sucursal_id)
+    if (!sucursal || (!sucursal.activo && !puedeConservarInactiva)) {
+      return res.status(400).json({ error: 'La sucursal no pertenece a la empresa o está inactiva' })
+    }
+    data.sucursal_id = sucursal.id
+  }
+  if (data.centro_trabajo_id) {
+    const centro = await db('centros_trabajo')
+      .where({ id: data.centro_trabajo_id, empresa_id: empleado.empresa_id })
+      .first('id', 'riesgo', 'activo')
+    const puedeConservarInactivo = Number(data.centro_trabajo_id) === Number(empleado.centro_trabajo_id)
+    if (!centro || (!centro.activo && !puedeConservarInactivo)) {
+      return res.status(400).json({ error: 'El centro de trabajo no pertenece a la empresa o está inactivo' })
+    }
+    data.centro_trabajo_id = centro.id
+    data.riesgo = centro.riesgo
   }
   normalizarNombres(data)
   const cambioEstado = data.status !== undefined && data.status !== empleado.status
@@ -372,7 +426,7 @@ export async function recontratar(req, res) {
     if (!await validarSalarioIntegral(res, empleado.empresa_id, integral, salario)) return null
     const camposCondiciones = [
       'tipo_contrato', 'salario_base', 'salario_integral', 'salario_variable', 'periodo_pago',
-      'cargo_id', 'sucursal_id', 'riesgo', 'tipo_vinculacion', 'eps_id', 'arl_id',
+      'cargo_id', 'sucursal_id', 'centro_trabajo_id', 'riesgo', 'tipo_vinculacion', 'eps_id', 'arl_id',
       'pension_id', 'caja_cf_id', 'auxilio_transporte_mode', 'subsidio_transporte', 'salario_menor_motivo',
     ]
     const [periodoId] = await trx('empleado_periodos').insert({

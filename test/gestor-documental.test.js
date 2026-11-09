@@ -204,6 +204,47 @@ test('el administrador puede agregar categorías y varias subcategorías a una c
     parent_id: firstSubcategory.data.categoria.id,
   }, { token: admin.token })
   assert.equal(nestedLevelNotSupported.status, 400)
+
+  const addedDocument = await api.post('/gestor-documental/admin/catalogo', {
+    categoria_id: firstSubcategory.data.categoria.id,
+    nombre: `Documento de subcategoría ${suffix}`,
+  }, { token: admin.token })
+  assert.equal(addedDocument.status, 201, JSON.stringify(addedDocument.data))
+  const removed = await api.delete(
+    `/gestor-documental/admin/categorias/${firstSubcategory.data.categoria.id}`,
+    { token: admin.token }
+  )
+  assert.equal(removed.status, 200)
+  assert.equal(removed.data.categorias_retiradas, 1)
+  const archivedCategory = await db('gestor_documental_categorias')
+    .where('id', firstSubcategory.data.categoria.id)
+    .first()
+  const archivedDocument = await db('gestor_documental_catalogo')
+    .where('id', addedDocument.data.documento.id)
+    .first()
+  assert.equal(!!archivedCategory.activo, false)
+  assert.equal(!!archivedDocument.activo, false)
+  const visibleCatalog = await api.get('/gestor-documental/admin/catalogo', { token: admin.token })
+  assert.equal(visibleCatalog.data.categorias.some(c => c.id === firstSubcategory.data.categoria.id), false)
+
+  const secondDocument = await api.post('/gestor-documental/admin/catalogo', {
+    categoria_id: secondSubcategory.data.categoria.id,
+    nombre: `Documento para retirar ${suffix}`,
+  }, { token: admin.token })
+  assert.equal(secondDocument.status, 201)
+  const retiredDocument = await api.put(
+    `/gestor-documental/admin/catalogo/${secondDocument.data.documento.id}`,
+    { activo: false },
+    { token: admin.token }
+  )
+  assert.equal(retiredDocument.status, 200)
+  const documentStillStored = await db('gestor_documental_catalogo')
+    .where('id', secondDocument.data.documento.id)
+    .first()
+  assert.equal(!!documentStillStored.activo, false)
+  const visibleAfterRetire = await api.get('/gestor-documental/admin/catalogo', { token: admin.token })
+  assert.equal(visibleAfterRetire.data.documentos.some(d => d.id === secondDocument.data.documento.id), false)
+
   for (const id of [...categoryIds].reverse()) {
     await db('gestor_documental_categorias').where('id', id).delete()
   }

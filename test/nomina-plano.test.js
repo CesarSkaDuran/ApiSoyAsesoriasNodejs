@@ -12,6 +12,7 @@ const detalles = [
     empleado_id: 11, tipo_documento: 'CC', numero_documento: '123456789',
     primer_apellido: 'Pérez', segundo_apellido: 'Gómez',
     primer_nombre: 'Ana', segundo_nombre: 'María', cargo_nombre: 'Analista',
+    sucursal_nombre: 'Obra Cúcuta',
     dias_laborados: 30, dias_incapacidad: 0,
     salario_base: 2000000, aux_transporte: 249095, horas_extras: 150000,
     otros_ingresos: 0, ingreso_noc: 0, total_devengado: 2399095,
@@ -57,6 +58,9 @@ test('plano principal: estructura, decimales con coma y fila TOTALES', () => {
   assert.ok(!out.includes('\uFEFF')) // sin BOM
   const cols = lineas[0].split(';')
   assert.equal(lineas[1].split(';').length, cols.length)
+  const sucursalCol = cols.indexOf('sucursal_obra')
+  assert.notEqual(sucursalCol, -1)
+  assert.equal(lineas[1].split(';')[sucursalCol], 'Obra Cúcuta')
   assert.ok(lineas[1].includes('2.000.000,00'.replace(/\./g, '')) || lineas[1].includes('2000000,00'))
   assert.ok(lineas[3].startsWith('TOTALES'))
   const tot = lineas[3].split(';')

@@ -117,6 +117,112 @@ export async function egresos(req, res) {
   res.json({ data })
 }
 
+// Nómina y gastos operativos por sucursal, con totales consolidados por empresa.
+export async function nominasSucursales(req, res) {
+  const empresaId = req.query.empresa_id ? Number(req.query.empresa_id) : null
+  const sucursalId = req.query.sucursal_id ? Number(req.query.sucursal_id) : null
+  if ((req.query.empresa_id && (!Number.isInteger(empresaId) || empresaId < 1))
+    || (req.query.sucursal_id && (!Number.isInteger(sucursalId) || sucursalId < 1))) {
+    return res.status(400).json({ error: 'El filtro de empresa o sucursal no es válido' })
+  }
+  if (sucursalId) {
+    const sucursal = await db('sucursales').where('id', sucursalId).first('empresa_id')
+    if (!sucursal) return res.status(404).json({ error: 'Sucursal no encontrada' })
+    if (empresaId && Number(sucursal.empresa_id) !== empresaId) {
+      return res.status(400).json({ error: 'La sucursal no pertenece a la empresa seleccionada' })
+    }
+  }
+
+  const nominasQuery = db('nomina_detalles as nd')
+    .join('nominas as n', 'n.id', 'nd.nomina_id')
+    .join('empresas as e', 'e.id', 'n.empresa_id')
+    .leftJoin('sucursales as s', 's.id', 'nd.sucursal_id')
+    .whereIn('n.status', ['liquidada', 'pagada'])
+  if (empresaId) nominasQuery.where('n.empresa_id', empresaId)
+  if (sucursalId) nominasQuery.where('nd.sucursal_id', sucursalId)
+  if (req.query.desde) nominasQuery.where(q =>
+    q.whereNull('n.fecha_fin').orWhere('n.fecha_fin', '>=', req.query.desde)
+  )
+  if (req.query.hasta) nominasQuery.where(q =>
+    q.whereNull('n.fecha_inicio').orWhere('n.fecha_inicio', '<=', req.query.hasta)
+  )
+  const branchNameSql = "COALESCE(nd.sucursal_nombre, s.nombre, 'Sin sucursal')"
+  const nominas = await nominasQuery
+    .select(
+      'n.empresa_id',
+      'e.razon_social as empresa_nombre',
+      'e.num_documento as empresa_nit',
+      'nd.sucursal_id',
+      db.raw(`${branchNameSql} as sucursal_nombre`),
+      db.raw('COUNT(DISTINCT n.id) as nominas'),
+      db.raw('COUNT(DISTINCT nd.empleado_id) as empleados'),
+      db.raw('COALESCE(SUM(nd.total_devengado), 0) as devengado'),
+      db.raw('COALESCE(SUM(nd.neto_pagar), 0) as neto'),
+      db.raw('COALESCE(SUM(nd.total_aportes_empleador), 0) as aportes'),
+      db.raw('COALESCE(SUM(nd.total_prestaciones), 0) as provisiones'),
+      db.raw('COALESCE(SUM(nd.costo_empresa), 0) as costo_nomina'),
+    )
+    .groupBy('n.empresa_id', 'e.razon_social', 'e.num_documento', 'nd.sucursal_id', 'nd.sucursal_nombre', 's.nombre')
+
+  const gastosQuery = db('gastos as g')
+    .join('empresas as e', 'e.id', 'g.empresa_id')
+    .leftJoin('sucursales as s', 's.id', 'g.sucursal_id')
+    .whereNot('g.status', 5)
+  if (empresaId) gastosQuery.where('g.empresa_id', empresaId)
+  if (sucursalId) gastosQuery.where('g.sucursal_id', sucursalId)
+  if (req.query.desde) gastosQuery.where('g.fecha', '>=', req.query.desde)
+  if (req.query.hasta) gastosQuery.where('g.fecha', '<=', req.query.hasta)
+  const gastos = await gastosQuery
+    .select(
+      'g.empresa_id',
+      'e.razon_social as empresa_nombre',
+      'e.num_documento as empresa_nit',
+      'g.sucursal_id',
+      db.raw("COALESCE(s.nombre, 'Sin sucursal') as sucursal_nombre"),
+      db.raw('COALESCE(SUM(g.valor + COALESCE(g.iva, 0)), 0) as gastos'),
+    )
+    .groupBy('g.empresa_id', 'e.razon_social', 'e.num_documento', 'g.sucursal_id', 's.nombre')
+
+  const rows = new Map()
+  for (const row of [...nominas, ...gastos]) {
+    const key = `${row.empresa_id}:${row.sucursal_id ?? 'none'}`
+    const current = rows.get(key) || {
+      empresa_id: Number(row.empresa_id),
+      empresa_nombre: row.empresa_nombre,
+      empresa_nit: row.empresa_nit,
+      sucursal_id: row.sucursal_id === null ? null : Number(row.sucursal_id),
+      sucursal_nombre: row.sucursal_nombre || 'Sin sucursal',
+      nominas: 0,
+      empleados: 0,
+      devengado: 0,
+      neto: 0,
+      aportes: 0,
+      provisiones: 0,
+      costo_nomina: 0,
+      gastos: 0,
+      costo_total: 0,
+    }
+    for (const field of ['nominas', 'empleados', 'devengado', 'neto', 'aportes', 'provisiones', 'costo_nomina', 'gastos']) {
+      current[field] += Number(row[field]) || 0
+    }
+    current.costo_total = current.costo_nomina + current.gastos
+    rows.set(key, current)
+  }
+  const data = [...rows.values()].sort((a, b) =>
+    a.empresa_nombre.localeCompare(b.empresa_nombre) || a.sucursal_nombre.localeCompare(b.sucursal_nombre)
+  )
+  const consolidado = data.reduce((total, row) => {
+    for (const field of ['nominas', 'empleados', 'devengado', 'neto', 'aportes', 'provisiones', 'costo_nomina', 'gastos', 'costo_total']) {
+      total[field] += Number(row[field]) || 0
+    }
+    return total
+  }, {
+    nominas: 0, empleados: 0, devengado: 0, neto: 0, aportes: 0,
+    provisiones: 0, costo_nomina: 0, gastos: 0, costo_total: 0,
+  })
+  res.json({ data, consolidado })
+}
+
 // Resumen de servicios prestados por categoria
 export async function servicios(req, res) {
   const { desde, hasta } = rango(req)

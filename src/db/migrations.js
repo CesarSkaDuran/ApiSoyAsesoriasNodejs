@@ -260,6 +260,13 @@ export async function runMigrations() {
       })
     }
   }
+  if (!await db.schema.hasColumn('empresas', 'pila_modalidad')) {
+    await db.schema.alterTable('empresas', t => {
+      t.enum('pila_modalidad', ['consolidada', 'por_sucursal'])
+        .notNullable().defaultTo('consolidada')
+    })
+    console.log('  + empresas.pila_modalidad (consolidada por NIT)')
+  }
 
   // Permite varios usuarios de acceso para una misma empresa sin reemplazar
   // el usuario principal conservado en empresas.user_id.
@@ -313,6 +320,12 @@ export async function runMigrations() {
       t.timestamps(true, true)
     })
     console.log('  + sucursales')
+  }
+  if (!await db.schema.hasColumn('sucursales', 'activo')) {
+    await db.schema.alterTable('sucursales', t => {
+      t.boolean('activo').notNullable().defaultTo(true)
+    })
+    console.log('  + sucursales.activo')
   }
 
   // Servicios contratados por cada empresa (reemplaza las ~14 columnas varchar de flags)
@@ -474,6 +487,9 @@ export async function runMigrations() {
     ['total_costo_empresa', t => t.decimal('total_costo_empresa', 15, 2).defaultTo(0)],
     ['fecha_inicio', t => t.date('fecha_inicio').nullable()],
     ['fecha_fin', t => t.date('fecha_fin').nullable()],
+    ['sucursal_id', t => t.integer('sucursal_id').unsigned().nullable().index()
+      .references('id').inTable('sucursales').onDelete('SET NULL')],
+    ['sucursal_nombre', t => t.string('sucursal_nombre', 150).nullable()],
   ]
   for (const [column, add] of nominaHeaderColumns) {
     if (!await db.schema.hasColumn('nominas', column)) {
@@ -528,6 +544,9 @@ export async function runMigrations() {
   }
 
   const nominaDetailColumns = [
+    ['sucursal_id', t => t.integer('sucursal_id').unsigned().nullable().index()
+      .references('id').inTable('sucursales').onDelete('SET NULL')],
+    ['sucursal_nombre', t => t.string('sucursal_nombre', 150).nullable()],
     ['salud_empleado', t => t.decimal('salud_empleado', 15, 2).defaultTo(0)],
     ['pension_empleado', t => t.decimal('pension_empleado', 15, 2).defaultTo(0)],
     ['fsp', t => t.decimal('fsp', 15, 2).defaultTo(0)],
@@ -916,6 +935,47 @@ export async function runMigrations() {
     if (statusCol[0]?.Type && !statusCol[0].Type.includes("'solicitada'")) {
       await db.raw("ALTER TABLE planillas MODIFY status ENUM('solicitada','generada','pagada','verificada') NOT NULL DEFAULT 'generada'")
       console.log('  ~ planillas.status +solicitada')
+    }
+  }
+  if (!await db.schema.hasColumn('planillas', 'sucursal_id')) {
+    await db.schema.alterTable('planillas', t => {
+      t.integer('sucursal_id').unsigned().nullable().index()
+        .references('id').inTable('sucursales').onDelete('SET NULL')
+    })
+    console.log('  + planillas.sucursal_id')
+  }
+  for (const [column, add] of [
+    ['nombre_periodo', t => t.string('nombre_periodo', 100).nullable()],
+    ['sucursal_nombre', t => t.string('sucursal_nombre', 150).nullable()],
+    ['sucursal_codigo_pila', t => t.string('sucursal_codigo_pila', 5).nullable()],
+  ]) {
+    if (!await db.schema.hasColumn('planillas', column)) {
+      await db.schema.alterTable('planillas', add)
+      console.log(`  + planillas.${column}`)
+    }
+  }
+  if (!await db.schema.hasTable('planilla_nominas')) {
+    // planillas/nominas pueden ser MyISAM en instalaciones antiguas; la relación
+    // se valida en los controladores para no forzar una conversión de tablas grandes.
+    await createTable('planilla_nominas', t => {
+      t.increments('id')
+      t.integer('planilla_id').unsigned().notNullable().index()
+      t.integer('nomina_id').unsigned().notNullable().unique()
+      t.timestamps(true, true)
+      t.unique(['planilla_id', 'nomina_id'], 'planilla_nominas_pair_unique')
+    })
+    console.log('  + planilla_nominas')
+  }
+  // Conserva el vínculo histórico uno-a-uno antes de permitir PILA consolidadas.
+  {
+    const vinculadas = await db('planillas').whereNotNull('nomina_id').select('id', 'nomina_id')
+    for (const vinculada of vinculadas) {
+      if (!await db('planilla_nominas').where('nomina_id', vinculada.nomina_id).first('id')) {
+        await db('planilla_nominas').insert({
+          planilla_id: vinculada.id,
+          nomina_id: vinculada.nomina_id,
+        })
+      }
     }
   }
 
@@ -2669,6 +2729,60 @@ export async function runMigrations() {
         .update({ categoria: 'legales' })
       await db('migraciones_log').insert({ nombre: logTipos })
       console.log('  ~ documento_tipos clasificados en empresa / legales')
+    }
+  }
+
+  if (!await db.schema.hasTable('centros_trabajo')) {
+    await createTable('centros_trabajo', t => {
+      t.increments('id')
+      t.integer('empresa_id').unsigned().notNullable().index()
+        .references('id').inTable('empresas').onDelete('CASCADE')
+      t.string('nombre', 150).notNullable()
+      t.enum('riesgo', ['I', 'II', 'III', 'IV', 'V']).notNullable()
+      t.boolean('activo').notNullable().defaultTo(true)
+      t.timestamps(true, true)
+      t.unique(['empresa_id', 'nombre'], 'centros_trabajo_empresa_nombre_unique')
+    })
+    console.log('  + centros_trabajo')
+  }
+  if (await db.schema.hasTable('empleados') && !await db.schema.hasColumn('empleados', 'centro_trabajo_id')) {
+    await db.schema.alterTable('empleados', t => {
+      t.integer('centro_trabajo_id').unsigned().nullable().index()
+        .references('id').inTable('centros_trabajo').onDelete('SET NULL')
+    })
+    console.log('  + empleados.centro_trabajo_id')
+  }
+
+  // Conserva la clase de riesgo existente al asociar empleados con centros
+  // iniciales. Luego la empresa puede renombrarlos o crear centros propios.
+  {
+    const nombre = 'centros_trabajo_baseline'
+    if (!await db('migraciones_log').where('nombre', nombre).first()) {
+      const empresas = await db('empresas').select('id', 'riesgo')
+      const riesgosValidos = new Set(['I', 'II', 'III', 'IV', 'V'])
+      for (const empresa of empresas) {
+        if (await db('centros_trabajo').where('empresa_id', empresa.id).first('id')) continue
+        const empleadosEmpresa = await db('empleados')
+          .where('empresa_id', empresa.id)
+          .whereIn('riesgo', [...riesgosValidos])
+          .select('id', 'riesgo', 'centro_trabajo_id')
+        const riesgos = [...new Set(empleadosEmpresa.map(e => e.riesgo))]
+        if (!riesgos.length && riesgosValidos.has(empresa.riesgo)) riesgos.push(empresa.riesgo)
+        for (const riesgo of riesgos) {
+          const [centroId] = await db('centros_trabajo').insert({
+            empresa_id: empresa.id,
+            nombre: `Centro de trabajo - Riesgo ${riesgo}`,
+            riesgo,
+          })
+          await db('empleados')
+            .where('empresa_id', empresa.id)
+            .where('riesgo', riesgo)
+            .whereNull('centro_trabajo_id')
+            .update({ centro_trabajo_id: centroId })
+        }
+      }
+      await db('migraciones_log').insert({ nombre })
+      console.log('  ~ centros de trabajo iniciales asociados a los riesgos existentes')
     }
   }
 

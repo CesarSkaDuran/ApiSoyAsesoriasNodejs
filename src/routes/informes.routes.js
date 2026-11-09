@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { authMiddleware, requireRole, requireModulo } from '../middlewares/auth.js'
 import {
   ingresos, egresos, servicios as informeServicios, solicitudes as informeSolicitudes,
+  nominasSucursales as informeNominasSucursales,
   clientesSolicitudes as informeClientesSolicitudes,
   resumen, dashboard, miResumen,
 } from '../controllers/informes.controller.js'
@@ -17,6 +18,7 @@ router.get('/dashboard', dashboard)
 router.get('/ingresos', ingresos)
 router.get('/egresos', egresos)
 router.get('/servicios', informeServicios)
+router.get('/nominas-sucursales', informeNominasSucursales)
 router.get('/solicitudes/clientes', informeClientesSolicitudes)
 router.get('/solicitudes', informeSolicitudes)
 

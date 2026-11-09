@@ -403,10 +403,12 @@ export async function listCatalog(req, res) {
 export async function listAdminCatalog(req, res) {
   const seccion = seccionCatalogo(req.query.seccion)
   const [categorias, documentos] = await Promise.all([
-    db('gestor_documental_categorias').where('seccion', seccion).orderBy('orden'),
+    db('gestor_documental_categorias').where({ seccion, activo: true }).orderBy('orden'),
     db('gestor_documental_catalogo as c')
       .join('gestor_documental_categorias as k', 'k.id', 'c.categoria_id')
       .where('k.seccion', seccion)
+      .where('k.activo', true)
+      .where('c.activo', true)
       .select(
         'c.id', 'c.source_code', 'c.categoria_id', 'c.nombre', 'c.orden', 'c.activo',
         'c.borrador_nombre', 'c.borrador_mime', 'c.borrador_size', 'c.borrador_publicado',
@@ -467,6 +469,45 @@ export async function createCatalogCategory(req, res) {
   })
   res.status(201).json({
     categoria: await db('gestor_documental_categorias').where('id', id).first(),
+  })
+}
+
+export async function deleteCatalogCategory(req, res) {
+  const categoria = await db('gestor_documental_categorias')
+    .where('id', req.params.id)
+    .first('id', 'activo')
+  if (!categoria) return res.status(404).json({ error: 'Categoría no encontrada' })
+  if (!categoria.activo) return res.json({ message: 'La categoría ya estaba retirada del catálogo' })
+
+  const ids = new Set([Number(categoria.id)])
+  const pending = [Number(categoria.id)]
+  while (pending.length) {
+    const parentId = pending.pop()
+    const children = await db('gestor_documental_categorias')
+      .where({ parent_id: parentId, activo: true })
+      .select('id')
+    for (const child of children) {
+      const id = Number(child.id)
+      if (!ids.has(id)) {
+        ids.add(id)
+        pending.push(id)
+      }
+    }
+  }
+
+  await db.transaction(async trx => {
+    await trx('gestor_documental_categorias').whereIn('id', [...ids]).update({
+      activo: false,
+      updated_at: trx.fn.now(),
+    })
+    await trx('gestor_documental_catalogo').whereIn('categoria_id', [...ids]).update({
+      activo: false,
+      updated_at: trx.fn.now(),
+    })
+  })
+  res.json({
+    message: 'Categoría retirada del catálogo; se conservaron los documentos y solicitudes anteriores',
+    categorias_retiradas: ids.size,
   })
 }
 
